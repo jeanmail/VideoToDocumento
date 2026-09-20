@@ -14,7 +14,7 @@ from core.video_processor import VideoProcessor, ExtractedFrame, ensure_thumbnai
 from core.ocr_engine import OCREngine
 from core.doc_builder import DocumentBuilder
 from core.transcriber import AudioTranscriber
-from core.gcs_publisher import GCSPublisher, SUPPORTED_PROJECTS
+from core.gcs_publisher import GCSPublisher, SUPPORTED_PROJECTS, slugify_training_name
 
 # Configurações de layout da página
 st.set_page_config(
@@ -752,7 +752,7 @@ elif st.session_state.current_step == 3:
     # Campo de nome do treinamento (subpasta por envio)
     training_name_input = st.text_input(
         "Nome do Treinamento / Versão:",
-        value=st.session_state.get("training_name", ""),
+        value=st.session_state.get("training_name", st.session_state.get("default_training_title", "")),
         placeholder="Ex: Onboarding Receita Digital - Set 2025",
         help=(
             "Identifica este envio dentro do produto. "
@@ -786,8 +786,8 @@ elif st.session_state.current_step == 3:
             ):
                 # Garante que docx e pdf estão gerados
                 builder = DocumentBuilder(title=doc_title, subtitle=doc_subtitle)
-                docx_output = os.path.join(OUTPUTS_DIR, "guia_treinamento.docx")
-                pdf_output = os.path.join(OUTPUTS_DIR, "guia_treinamento.pdf")
+                docx_output = os.path.join(OUTPUTS_DIR, f"{clean_file_base}.docx")
+                pdf_output = os.path.join(OUTPUTS_DIR, f"{clean_file_base}.pdf")
                 builder.build_docx(approved_frames, docx_output, all_subtitles=all_subs)
                 builder.build_pdf(approved_frames, pdf_output, all_subtitles=all_subs)
 
