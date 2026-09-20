@@ -252,8 +252,6 @@ if st.session_state.current_step == 1:
                 help="Une blocos de legenda muito próximos para gerar títulos e capturas coesas."
             )
 
-        enable_ocr = st.checkbox("Executar OCR nas telas extraídas (detecção de botões e texto)", value=False)
-
     can_proceed = (uploaded_video is not None)
 
     if can_proceed:
@@ -308,7 +306,6 @@ if st.session_state.current_step == 1:
                     subtitles_for_frames = group_subtitles(subtitles_for_frames, max_gap_seconds=1.5, max_duration_seconds=15.0)
 
             prog_bar = st.progress(0, text="Extraindo e analisando telas de sistema...")
-            ocr_engine = OCREngine(enabled=enable_ocr)
 
             # Processamento e extração com detecção automática de câmeras/webcams e duplicadas
             extracted_frames = processor.process_subtitles(
@@ -317,15 +314,6 @@ if st.session_state.current_step == 1:
                 min_interval_seconds=min_interval,
                 similarity_threshold=sim_threshold / 100.0
             )
-
-            # OCR opcional
-            if enable_ocr:
-                for idx, frame in enumerate(extracted_frames):
-                    prog_bar.progress(
-                        (idx + 1) / len(extracted_frames),
-                        text=f"Analisando OCR no frame {idx+1}/{len(extracted_frames)}..."
-                    )
-                    frame.ocr_text = ocr_engine.extract_text(frame.image_path)
 
             prog_bar.empty()
             st.session_state.frames = extracted_frames
