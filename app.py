@@ -211,8 +211,9 @@ if st.session_state.current_step == 1:
             if st.button("🎙️ Gerar Transcrição do Vídeo Agora", type="secondary"):
                 video_ext = os.path.splitext(uploaded_video.name)[1]
                 saved_video_path = os.path.join(TEMP_UPLOADS, f"input_video{video_ext}")
+                uploaded_video.seek(0)
                 with open(saved_video_path, "wb") as f:
-                    f.write(uploaded_video.getbuffer() if hasattr(uploaded_video, 'getbuffer') else uploaded_video.read())
+                    shutil.copyfileobj(uploaded_video, f, length=16 * 1024 * 1024)
                 st.session_state.video_path = saved_video_path
 
                 trans_bar = st.progress(0, text="Iniciando motor Whisper...")
@@ -278,8 +279,9 @@ if st.session_state.current_step == 1:
             with st.spinner("Salvando arquivos e inicializando processamento..."):
                 video_ext = os.path.splitext(uploaded_video.name)[1]
                 saved_video_path = os.path.join(TEMP_UPLOADS, f"input_video{video_ext}")
+                uploaded_video.seek(0)
                 with open(saved_video_path, "wb") as f:
-                    f.write(uploaded_video.getbuffer() if hasattr(uploaded_video, 'getbuffer') else uploaded_video.read())
+                    shutil.copyfileobj(uploaded_video, f, length=16 * 1024 * 1024)
 
                 st.session_state.video_path = saved_video_path
                 processor = VideoProcessor(saved_video_path)
