@@ -82,3 +82,33 @@ def test_video_processor_extraction(sample_video, tmp_path):
     assert os.path.exists(frames[1].image_path)
     assert frames[0].subtitle_text == "Primeira tela"
     assert frames[1].subtitle_text == "Segunda tela"
+
+
+def test_detect_non_system_frame():
+    from core.video_processor import detect_non_system_frame
+    
+    # 1. Tela vazia ou sem estrutura (deve ser detectada como sem interface)
+    blank_img = np.zeros((480, 640, 3), dtype=np.uint8)
+    is_non_sys, reason = detect_non_system_frame(blank_img)
+    assert is_non_sys is True
+    assert "sem interface" in reason.lower()
+
+    # 2. Tela de sistema (com bordas ortogonais e tabelas)
+    ui_img = np.full((480, 640, 3), 245, dtype=np.uint8) # Fundo claro de sistema
+    # Desenha janela e tabela com linhas pretas horizontais e verticais
+    for y in range(50, 400, 30):
+        cv2.line(ui_img, (50, y), (590, y), (40, 40, 40), 2)
+    for x in range(50, 600, 100):
+        cv2.line(ui_img, (x, 50), (x, 400), (40, 40, 40), 2)
+    cv2.putText(ui_img, "SISTEMA ERP - CADASTRO", (60, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+    
+    is_non_sys_ui, _ = detect_non_system_frame(ui_img)
+    assert is_non_sys_ui is False
+
+    # 3. Simulação de webcam (tons de pele predominantes)
+    # BGR para tom de pele comum: ex B=130, G=150, R=210
+    skin_img = np.full((480, 640, 3), (120, 140, 205), dtype=np.uint8)
+    is_non_sys_skin, skin_reason = detect_non_system_frame(skin_img)
+    assert is_non_sys_skin is True
+    assert "câmera" in skin_reason.lower() or "pessoas" in skin_reason.lower()
+

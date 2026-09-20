@@ -27,6 +27,56 @@ class ExtractedFrame:
     step_title: str = ""
     ocr_text: str = ""
     group_id: Optional[str] = None
+    is_non_system_candidate: bool = False
+    non_system_reason: str = ""
+
+
+def detect_non_system_frame(image_np: np.ndarray) -> Tuple[bool, str]:
+    """
+    Analisa se o quadro capturado parece ser apenas câmeras/webcams/pessoas ou
+    quadro sem interface de sistema, utilizando métricas de visão computacional:
+    1. Detecção de linhas ortogonais estruturadas (típicas de janelas, menus, tabelas e inputs).
+    2. Proporção de tons de pele humana (espaço de cores YCrCb).
+    3. Densidade de bordas e contraste característico de telas de software.
+    """
+    if image_np is None or image_np.size == 0:
+        return False, ""
+
+    try:
+        h, w = image_np.shape[:2]
+        target_w = 480
+        target_h = int(h * (target_w / float(w)))
+        small = cv2.resize(image_np, (target_w, target_h), interpolation=cv2.INTER_AREA)
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+
+        edges = cv2.Canny(gray, 50, 150)
+        total_edge_pixels = int(np.count_nonzero(edges))
+        total_pixels = target_w * target_h
+
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15))
+        h_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, h_kernel)
+        v_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, v_kernel)
+        ortho_pixels = int(np.count_nonzero(h_lines) + np.count_nonzero(v_lines))
+
+        edge_density = total_edge_pixels / float(total_pixels)
+        ortho_ratio = ortho_pixels / float(max(1, total_edge_pixels))
+
+        ycrcb = cv2.cvtColor(small, cv2.COLOR_BGR2YCrCb)
+        skin_mask = cv2.inRange(ycrcb, np.array([0, 133, 77]), np.array([255, 173, 127]))
+        skin_ratio = int(np.count_nonzero(skin_mask)) / float(total_pixels)
+
+        # Regra 1: Alta proporção de pele E baixa estrutura de linhas ortogonais de software
+        if skin_ratio > 0.07 and ortho_ratio < 0.40:
+            return True, f"Câmera/Pessoas detectadas ({skin_ratio*100:.1f}% área de pele sem tela de sistema)"
+
+        # Regra 2: Ausência de interface (muito pouca borda ou pouquíssima estrutura ortogonal)
+        if edge_density < 0.012 and ortho_ratio < 0.28:
+            return True, "Tela sem interface de software identificável"
+
+        return False, ""
+    except Exception:
+        return False, ""
 
 
 def ensure_thumbnail(image_path: str, max_width: int = 480) -> str:
@@ -200,8 +250,14 @@ class VideoProcessor:
                 if sim_score >= similarity_threshold:
                     is_duplicate = True
 
+            # Detecta câmeras, webcams ou quadros sem interface de software
+            is_non_system, non_sys_reason = detect_non_system_frame(frame_img)
+
             # Salva o arquivo de imagem
             image_path = self.save_frame_to_file(frame_img, output_dir, file_prefix=f"step_{idx+1}")
+
+            # Desmarca automaticamente os duplicados e telas sem sistema/webcams
+            should_select = (not is_duplicate) and (not is_non_system)
 
             frame_id = f"frame_{idx+1}_{uuid.uuid4().hex[:6]}"
             results.append(ExtractedFrame(
@@ -212,7 +268,9 @@ class VideoProcessor:
                 image_path=image_path,
                 is_duplicate_candidate=is_duplicate,
                 similarity_score=round(sim_score, 3),
-                selected=not is_duplicate,  # Desmarca automaticamente os duplicados para conveniência
+                is_non_system_candidate=is_non_system,
+                non_system_reason=non_sys_reason,
+                selected=should_select,
                 step_title=f"Passo {len(results) + 1}",
                 ocr_text=""
             ))
@@ -247,6 +305,11 @@ class VideoProcessor:
         extracted_frame.image_path = image_path
         extracted_frame.thumb_path = ensure_thumbnail(image_path)
         extracted_frame.timestamp_seconds = new_timestamp
+        
+        # Atualiza a detecção de interface/câmera
+        is_non_system, non_sys_reason = detect_non_system_frame(new_frame)
+        extracted_frame.is_non_system_candidate = is_non_system
+        extracted_frame.non_system_reason = non_sys_reason
         
         # Atualiza a string do timestamp
         tot = int(new_timestamp)
