@@ -13,6 +13,10 @@ permissions:
   contents: read
   packages: write
 
+# Silencia o aviso de deprecation do Node.js 20 no runner do GitHub Actions
+env:
+  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: "node24"
+
 jobs:
   test:
     name: Run Unit & Integration Tests
@@ -75,7 +79,7 @@ jobs:
             type=ref,event=branch
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
