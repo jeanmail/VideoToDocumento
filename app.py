@@ -145,6 +145,17 @@ with st.sidebar:
                     pass
         st.rerun()
 
+    # Informações de Versão e Build no rodapé da barra lateral
+    st.markdown("---")
+    APP_VERSION = "v1.2.0"
+    st.markdown(
+        f"<div style='text-align: center; color: #888888; font-size: 0.82em; padding: 6px 0;'>"
+        f"<strong>Versão:</strong> <code>{APP_VERSION}</code><br>"
+        f"<span style='font-size: 0.9em;'>Build: <em>main (sem OCR)</em></span>"
+        f"</div>",
+        unsafe_allow_html=True
+    )
+
 
 # ==========================================
 # ETAPA 1: Upload e Pré-Processamento
