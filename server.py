@@ -109,6 +109,9 @@ def run_extraction_worker(
     similarity_threshold: float,
 ):
     try:
+        if extraction_jobs.get(job_id, {}).get("cancelled"):
+            raise InterruptedError("Processamento suspenso pelo usuário")
+
         extraction_jobs[job_id]["stage"] = "transcription"
         extraction_jobs[job_id]["message"] = "Iniciando transcrição de áudio..."
         extraction_jobs[job_id]["progress"] = 0.08
@@ -123,6 +126,8 @@ def run_extraction_worker(
             subs = parse_subtitles(subtitle_content)
         else:
             def audio_progress(ratio: float, msg: str):
+                if extraction_jobs.get(job_id, {}).get("cancelled"):
+                    raise InterruptedError("Processamento suspenso pelo usuário")
                 # ratio vai de 0.0 a 1.0; mapeia para 0.10 a 0.65 do progresso total
                 mapped_prog = min(0.65, 0.10 + (ratio * 0.55))
                 extraction_jobs[job_id]["progress"] = round(mapped_prog, 3)
@@ -130,6 +135,9 @@ def run_extraction_worker(
 
             transcriber = AudioTranscriber(model_size="base")
             subs = transcriber.transcribe(saved_video, language=language, progress_callback=audio_progress)
+
+        if extraction_jobs.get(job_id, {}).get("cancelled"):
+            raise InterruptedError("Processamento suspenso pelo usuário")
 
         state.subtitles = subs or []
 
@@ -144,6 +152,8 @@ def run_extraction_worker(
         subs_grouped = group_subtitles(state.subtitles, max_gap_seconds=1.5, max_duration_seconds=15.0) if state.subtitles else []
 
         def frames_progress(ratio: float, msg: str):
+            if extraction_jobs.get(job_id, {}).get("cancelled"):
+                raise InterruptedError("Processamento suspenso pelo usuário")
             # ratio vai de 0.0 a 1.0; mapeia para 0.68 a 0.98 do progresso total
             mapped_prog = min(0.98, 0.68 + (ratio * 0.30))
             extraction_jobs[job_id]["progress"] = round(mapped_prog, 3)
@@ -156,6 +166,10 @@ def run_extraction_worker(
             similarity_threshold=similarity_threshold / 100.0,
             progress_callback=frames_progress,
         )
+
+        if extraction_jobs.get(job_id, {}).get("cancelled"):
+            raise InterruptedError("Processamento suspenso pelo usuário")
+
         state.frames = extracted
 
         # Monta resposta serializada
@@ -191,10 +205,17 @@ def run_extraction_worker(
         extraction_jobs[job_id]["message"] = "Processamento concluído com sucesso!"
         extraction_jobs[job_id]["result"] = result_payload
 
+    except InterruptedError:
+        extraction_jobs[job_id]["status"] = "cancelled"
+        extraction_jobs[job_id]["message"] = "Processamento suspenso pelo usuário."
+        extraction_jobs[job_id]["progress"] = 0.0
     except Exception as exc:
+        import traceback
+        tb_str = traceback.format_exc()
         extraction_jobs[job_id]["status"] = "error"
-        extraction_jobs[job_id]["error"] = str(exc)
-        extraction_jobs[job_id]["message"] = f"Erro no processamento: {str(exc)}"
+        extraction_jobs[job_id]["error"] = str(exc) or type(exc).__name__
+        extraction_jobs[job_id]["details"] = tb_str
+        extraction_jobs[job_id]["message"] = f"Falha no processamento: {str(exc) or type(exc).__name__}"
 
 
 @app.post("/api/extract")
@@ -224,6 +245,8 @@ async def extract_video(
             "message": "Vídeo salvo. Iniciando análise...",
             "result": None,
             "error": None,
+            "details": None,
+            "cancelled": False,
         }
 
         if sync:
@@ -238,7 +261,7 @@ async def extract_video(
             )
             job = extraction_jobs[job_id]
             if job["status"] == "error":
-                raise HTTPException(status_code=500, detail=job["error"])
+                raise HTTPException(status_code=500, detail={"message": job["error"], "details": job.get("details")})
             return job["result"]
 
         # Inicia thread em segundo plano com monitoramento de progresso
@@ -262,7 +285,27 @@ async def extract_video(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        tb_str = traceback.format_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": f"Falha ao iniciar processamento: {str(e)}",
+                "details": tb_str,
+                "error_type": type(e).__name__
+            }
+        )
+
+
+@app.post("/api/extract/cancel/{job_id}")
+def cancel_extract_job(job_id: str):
+    job = extraction_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    job["cancelled"] = True
+    job["status"] = "cancelled"
+    job["message"] = "Processamento suspenso pelo usuário."
+    return {"success": True, "message": "Job cancelado com sucesso"}
 
 
 @app.get("/api/extract/progress/{job_id}")

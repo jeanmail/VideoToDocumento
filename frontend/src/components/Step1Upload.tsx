@@ -1,6 +1,20 @@
 import { useState, useRef } from 'react';
-import { UploadCloud, SlidersHorizontal, ChevronDown, FileText, X, Loader, Sparkles, Layers, CheckCircle2 } from 'lucide-react';
-import { api, ExtractResponse } from '../api';
+import {
+  UploadCloud,
+  SlidersHorizontal,
+  ChevronDown,
+  FileText,
+  X,
+  Sparkles,
+  Layers,
+  CheckCircle2,
+  Square,
+  AlertCircle,
+  Code2,
+  Copy,
+  Check,
+} from 'lucide-react';
+import { api, ExtractResponse, ExtractController, ExtractError } from '../api';
 
 interface Step1Props {
   onExtractSuccess: (res: ExtractResponse) => void;
@@ -18,9 +32,14 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
   const [progressMessage, setProgressMessage] = useState('');
   const [progressStage, setProgressStage] = useState<'upload' | 'transcription' | 'extraction' | 'done'>('upload');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
+  const [copiedError, setCopiedError] = useState(false);
+  const [userCancelledNotice, setUserCancelledNotice] = useState(false);
 
   const videoRef = useRef<HTMLInputElement>(null);
   const subtitleRef = useRef<HTMLInputElement>(null);
+  const controllerRef = useRef<ExtractController | undefined>(undefined);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -35,10 +54,24 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
     ? 'Extrair prints com legenda fornecida'
     : 'Extrair prints e transcrição';
 
+  const handleCancel = () => {
+    if (controllerRef.current) {
+      controllerRef.current.abort();
+    }
+    setLoading(false);
+    setProgressPercent(0);
+    setProgressMessage('');
+    setUserCancelledNotice(true);
+    setTimeout(() => setUserCancelledNotice(false), 4000);
+  };
+
   const handleProcess = async () => {
     if (!videoFile || loading) return;
     setLoading(true);
     setErrorMsg(null);
+    setErrorDetails(null);
+    setShowErrorDetails(false);
+    setUserCancelledNotice(false);
     setProgressPercent(2);
     setProgressStage('upload');
     setProgressMessage('Iniciando envio do vídeo...');
@@ -54,11 +87,20 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
           setProgressPercent(percent);
           setProgressMessage(message);
           setProgressStage(stage as any);
-        }
+        },
+        controllerRef
       );
       onExtractSuccess(res);
     } catch (err: any) {
+      if (err.message?.includes('suspenso') || err.name === 'AbortError') {
+        setUserCancelledNotice(true);
+        setTimeout(() => setUserCancelledNotice(false), 4000);
+        return;
+      }
+
       setErrorMsg(err.message || 'Ocorreu um erro ao processar o vídeo.');
+      const det = err instanceof ExtractError ? err.details : (err.details || err.stack || String(err));
+      setErrorDetails(det || null);
     } finally {
       setLoading(false);
     }
@@ -130,10 +172,77 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
           </div>
         </div>
 
-        {/* Error Feedback */}
+        {/* Notificação de cancelamento pelo usuário */}
+        {userCancelledNotice && (
+          <div className="mt-4 p-3.5 bg-[#FFFBEB] border border-[#FDE68A] rounded-xl text-[13px] text-[#B45309] flex items-center justify-between animate-in fade-in duration-200">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-[#F59E0B] flex-shrink-0" />
+              <span>Processamento suspenso pelo usuário. Os arquivos foram mantidos para novo envio.</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUserCancelledNotice(false)}
+              className="text-[#B45309] hover:text-[#78350F] p-1 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Error Feedback com Opção de Detalhes Técnicos */}
         {errorMsg && (
-          <div className="mt-4 p-4 bg-[#FEF2F2] border border-[#FECACA] rounded-xl text-[13px] text-[#B91C1C]">
-            {errorMsg}
+          <div className="mt-4 p-4 bg-[#FEF2F2] border border-[#FECACA] rounded-xl text-[13px] text-[#B91C1C] flex flex-col gap-2 animate-in fade-in duration-200">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2 flex-1">
+                <AlertCircle className="w-4 h-4 text-[#EF4444] flex-shrink-0" />
+                <span className="font-medium text-[13px]">{errorMsg}</span>
+              </div>
+              {errorDetails && (
+                <button
+                  type="button"
+                  onClick={() => setShowErrorDetails(!showErrorDetails)}
+                  className="text-[12px] font-medium text-[#DC2626] hover:text-[#991B1B] underline underline-offset-2 flex items-center gap-1 cursor-pointer flex-shrink-0"
+                >
+                  <Code2 className="w-3.5 h-3.5" />
+                  <span>{showErrorDetails ? 'Ocultar detalhes' : 'Ver detalhes técnicos'}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Log técnico expansível para desenvolvedores */}
+            {showErrorDetails && errorDetails && (
+              <div className="mt-2 p-3 bg-[#111827] text-[#E5E7EB] rounded-lg font-mono text-[11px] overflow-hidden border border-[#374151]">
+                <div className="flex justify-between items-center pb-2 mb-2 border-b border-[#374151]/80">
+                  <span className="text-[#9CA3AF] text-[10px] uppercase tracking-wider font-semibold">
+                    Log Técnico / Stack Trace (para suporte)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(errorDetails);
+                      setCopiedError(true);
+                      setTimeout(() => setCopiedError(false), 2500);
+                    }}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#1F2937] hover:bg-[#374151] text-[11px] text-[#F3F4F6] border border-[#4B5563] transition-colors cursor-pointer"
+                  >
+                    {copiedError ? (
+                      <>
+                        <Check className="w-3 h-3 text-[#10B981]" />
+                        <span className="text-[#10B981] font-medium">Copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3 text-[#9CA3AF]" />
+                        <span>Copiar erro</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <pre className="whitespace-pre-wrap break-words max-h-60 overflow-y-auto leading-relaxed text-[#FCA5A5] text-[11px] pr-2">
+                  {errorDetails}
+                </pre>
+              </div>
+            )}
           </div>
         )}
 
@@ -191,27 +300,29 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
           </div>
         )}
 
-        {/* CTA */}
-        <button
-          onClick={handleProcess}
-          disabled={!videoFile || loading}
-          className={`w-full mt-4 py-4 rounded-xl text-[15px] font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
-            loading
-              ? 'bg-[#1F2937] text-white opacity-90 cursor-wait'
-              : videoFile
-              ? 'bg-[#111827] text-white hover:bg-[#1F2937] shadow-sm hover:shadow'
-              : 'bg-[#F3F4F6] text-[#C4C9D4] cursor-not-allowed'
-          }`}
-        >
-          {loading ? (
-            <>
-              <Loader className="w-5 h-5 animate-spin" />
-              <span>Processando... ({progressPercent}%)</span>
-            </>
-          ) : (
-            ctaLabel
-          )}
-        </button>
+        {/* Botão de Ação: Alterna entre Iniciar Processo e Suspender Processamento */}
+        {loading ? (
+          <button
+            onClick={handleCancel}
+            type="button"
+            className="w-full mt-4 py-3.5 rounded-xl text-[14px] font-semibold transition-all duration-200 flex items-center justify-center gap-2 bg-[#FEF2F2] border border-[#FECACA] text-[#DC2626] hover:bg-[#FEE2E2] hover:border-[#F87171] active:scale-[0.99] shadow-xs cursor-pointer"
+          >
+            <Square className="w-4 h-4 fill-current text-[#DC2626]" />
+            <span>Suspender processamento</span>
+          </button>
+        ) : (
+          <button
+            onClick={handleProcess}
+            disabled={!videoFile}
+            className={`w-full mt-4 py-4 rounded-xl text-[15px] font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
+              videoFile
+                ? 'bg-[#111827] text-white hover:bg-[#1F2937] shadow-sm hover:shadow cursor-pointer'
+                : 'bg-[#F3F4F6] text-[#C4C9D4] cursor-not-allowed'
+            }`}
+          >
+            {ctaLabel}
+          </button>
+        )}
 
         {/* Preferences */}
         <div className="mt-8">
