@@ -7,8 +7,10 @@ além de servir os arquivos estáticos compilados do React na mesma porta.
 import os
 import shutil
 import tempfile
+import threading
+import uuid
 import zipfile
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -93,46 +95,66 @@ def health_check():
     return {"status": "ok", "version": "v1.2.0"}
 
 
-@app.post("/api/extract")
-async def extract_video(
-    video: UploadFile = File(...),
-    subtitle: Optional[UploadFile] = File(None),
-    language: str = Form("pt"),
-    min_interval: float = Form(2.5),
-    similarity_threshold: float = Form(88.0),
+# Gerenciamento de tarefas de processamento com feedback de progresso
+extraction_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+def run_extraction_worker(
+    job_id: str,
+    saved_video: str,
+    raw_name: str,
+    subtitle_content: Optional[bytes],
+    language: str,
+    min_interval: float,
+    similarity_threshold: float,
 ):
     try:
-        # Salva o vídeo enviado
-        ext = os.path.splitext(video.filename)[1] or ".mp4"
-        saved_video = os.path.join(TEMP_UPLOADS, f"input_video{ext}")
-        with open(saved_video, "wb") as f:
-            shutil.copyfileobj(video.file, f, length=16 * 1024 * 1024)
+        extraction_jobs[job_id]["stage"] = "transcription"
+        extraction_jobs[job_id]["message"] = "Iniciando transcrição de áudio..."
+        extraction_jobs[job_id]["progress"] = 0.08
 
         state.video_path = saved_video
-        raw_name = os.path.splitext(video.filename)[0]
         state.video_name = raw_name.replace("_", " ").replace("-", " ").strip()
 
-        # Legenda: fornecida ou via Whisper
         subs: List[SubtitleItem] = []
-        if subtitle and subtitle.filename:
-            sub_content = await subtitle.read()
-            subs = parse_subtitles(sub_content)
+        if subtitle_content:
+            extraction_jobs[job_id]["message"] = "Processando arquivo de legenda fornecido..."
+            extraction_jobs[job_id]["progress"] = 0.60
+            subs = parse_subtitles(subtitle_content)
         else:
+            def audio_progress(ratio: float, msg: str):
+                # ratio vai de 0.0 a 1.0; mapeia para 0.10 a 0.65 do progresso total
+                mapped_prog = min(0.65, 0.10 + (ratio * 0.55))
+                extraction_jobs[job_id]["progress"] = round(mapped_prog, 3)
+                extraction_jobs[job_id]["message"] = msg
+
             transcriber = AudioTranscriber(model_size="base")
-            subs = transcriber.transcribe(saved_video, language=language)
+            subs = transcriber.transcribe(saved_video, language=language, progress_callback=audio_progress)
 
         state.subtitles = subs or []
 
-        # Extração de frames com detecção de câmeras e duplicadas
+        # Fase 2: Extração de frames e análise de similaridade
+        extraction_jobs[job_id]["stage"] = "extraction"
+        extraction_jobs[job_id]["message"] = "Sincronizando timeline e extraindo frames de sistema..."
+        extraction_jobs[job_id]["progress"] = 0.68
+
         processor = VideoProcessor(saved_video)
         state.processor = processor
 
         subs_grouped = group_subtitles(state.subtitles, max_gap_seconds=1.5, max_duration_seconds=15.0) if state.subtitles else []
+
+        def frames_progress(ratio: float, msg: str):
+            # ratio vai de 0.0 a 1.0; mapeia para 0.68 a 0.98 do progresso total
+            mapped_prog = min(0.98, 0.68 + (ratio * 0.30))
+            extraction_jobs[job_id]["progress"] = round(mapped_prog, 3)
+            extraction_jobs[job_id]["message"] = msg
+
         extracted = processor.process_subtitles(
             subtitles=subs_grouped,
             output_dir=EXTRACTED_FRAMES,
             min_interval_seconds=min_interval,
             similarity_threshold=similarity_threshold / 100.0,
+            progress_callback=frames_progress,
         )
         state.frames = extracted
 
@@ -142,7 +164,7 @@ async def extract_video(
         duplicate_count = sum(1 for f in extracted if f.is_duplicate_candidate)
         non_system_count = sum(1 for f in extracted if getattr(f, "is_non_system_candidate", False))
 
-        return {
+        result_payload = {
             "success": True,
             "video_name": state.video_name,
             "frames": frames_resp,
@@ -163,8 +185,92 @@ async def extract_video(
             "non_system_count": non_system_count,
         }
 
+        extraction_jobs[job_id]["status"] = "completed"
+        extraction_jobs[job_id]["stage"] = "done"
+        extraction_jobs[job_id]["progress"] = 1.0
+        extraction_jobs[job_id]["message"] = "Processamento concluído com sucesso!"
+        extraction_jobs[job_id]["result"] = result_payload
+
+    except Exception as exc:
+        extraction_jobs[job_id]["status"] = "error"
+        extraction_jobs[job_id]["error"] = str(exc)
+        extraction_jobs[job_id]["message"] = f"Erro no processamento: {str(exc)}"
+
+
+@app.post("/api/extract")
+async def extract_video(
+    video: UploadFile = File(...),
+    subtitle: Optional[UploadFile] = File(None),
+    language: str = Form("pt"),
+    min_interval: float = Form(2.5),
+    similarity_threshold: float = Form(88.0),
+    sync: bool = Query(False),
+):
+    try:
+        # Salva o vídeo enviado
+        ext = os.path.splitext(video.filename)[1] or ".mp4"
+        saved_video = os.path.join(TEMP_UPLOADS, f"input_video_{uuid.uuid4().hex[:8]}{ext}")
+        with open(saved_video, "wb") as f:
+            shutil.copyfileobj(video.file, f, length=16 * 1024 * 1024)
+
+        raw_name = os.path.splitext(video.filename)[0]
+        sub_bytes = await subtitle.read() if (subtitle and subtitle.filename) else None
+
+        job_id = f"job_{uuid.uuid4().hex}"
+        extraction_jobs[job_id] = {
+            "status": "processing",
+            "stage": "upload",
+            "progress": 0.05,
+            "message": "Vídeo salvo. Iniciando análise...",
+            "result": None,
+            "error": None,
+        }
+
+        if sync:
+            run_extraction_worker(
+                job_id=job_id,
+                saved_video=saved_video,
+                raw_name=raw_name,
+                subtitle_content=sub_bytes,
+                language=language,
+                min_interval=min_interval,
+                similarity_threshold=similarity_threshold,
+            )
+            job = extraction_jobs[job_id]
+            if job["status"] == "error":
+                raise HTTPException(status_code=500, detail=job["error"])
+            return job["result"]
+
+        # Inicia thread em segundo plano com monitoramento de progresso
+        t = threading.Thread(
+            target=run_extraction_worker,
+            kwargs={
+                "job_id": job_id,
+                "saved_video": saved_video,
+                "raw_name": raw_name,
+                "subtitle_content": sub_bytes,
+                "language": language,
+                "min_interval": min_interval,
+                "similarity_threshold": similarity_threshold,
+            },
+            daemon=True,
+        )
+        t.start()
+
+        return {"job_id": job_id, "status": "processing"}
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/extract/progress/{job_id}")
+def get_extract_progress(job_id: str):
+    job = extraction_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    return job
 
 
 @app.post("/api/frames/{frame_id}/adjust-time")

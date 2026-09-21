@@ -71,7 +71,7 @@ class AudioTranscriber:
         Transcreve o arquivo de vídeo/áudio e retorna lista de SubtitleItem com timestamps.
         """
         if progress_callback:
-            progress_callback(0.05, "Inicializando motor de transcrição Whisper...")
+            progress_callback(0.05, "Inicializando motor de transcrição...")
 
         self._load_model()
 
@@ -80,7 +80,7 @@ class AudioTranscriber:
         if ext not in [".wav", ".mp3"]:
             wav_temp = f"{video_or_audio_path}_temp_audio.wav"
             if progress_callback:
-                progress_callback(0.15, "Extraindo faixa de áudio do vídeo com FFmpeg...")
+                progress_callback(0.15, "Extraindo faixa de áudio do vídeo...")
             audio_path = self.extract_audio(video_or_audio_path, wav_temp)
         else:
             audio_path = video_or_audio_path
@@ -88,7 +88,7 @@ class AudioTranscriber:
 
         try:
             if progress_callback:
-                progress_callback(0.30, f"Processando fala com modelo Whisper ({self.model_size})...")
+                progress_callback(0.30, "Processando fala do áudio...")
 
             lang_arg = language if (language and language != "auto") else None
             segments, info = self._model.transcribe(

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { UploadCloud, SlidersHorizontal, ChevronDown, FileText, X, Loader } from 'lucide-react';
+import { UploadCloud, SlidersHorizontal, ChevronDown, FileText, X, Loader, Sparkles, Layers, CheckCircle2 } from 'lucide-react';
 import { api, ExtractResponse } from '../api';
 
 interface Step1Props {
@@ -14,7 +14,9 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
   const [minInterval, setMinInterval] = useState(2.5);
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loadingText, setLoadingText] = useState('');
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [progressMessage, setProgressMessage] = useState('');
+  const [progressStage, setProgressStage] = useState<'upload' | 'transcription' | 'extraction' | 'done'>('upload');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLInputElement>(null);
@@ -37,10 +39,23 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
     if (!videoFile || loading) return;
     setLoading(true);
     setErrorMsg(null);
-    setLoadingText(subtitleFile ? 'Analisando vídeo e sincronizando telas...' : 'Transcrevendo fala e extraindo prints de sistema...');
+    setProgressPercent(2);
+    setProgressStage('upload');
+    setProgressMessage('Iniciando envio do vídeo...');
 
     try {
-      const res = await api.extractVideo(videoFile, subtitleFile, language, minInterval);
+      const res = await api.extractVideo(
+        videoFile,
+        subtitleFile,
+        language,
+        minInterval,
+        88,
+        (percent, message, stage) => {
+          setProgressPercent(percent);
+          setProgressMessage(message);
+          setProgressStage(stage as any);
+        }
+      );
       onExtractSuccess(res);
     } catch (err: any) {
       setErrorMsg(err.message || 'Ocorreu um erro ao processar o vídeo.');
@@ -122,11 +137,65 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
           </div>
         )}
 
+        {/* Progress Card durante processamento */}
+        {loading && (
+          <div className="mt-5 p-5 bg-white border border-[#E5E7EB] rounded-2xl shadow-sm flex flex-col gap-3.5">
+            {/* Header com indicador de etapa e porcentagem */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#ECFDF5] flex items-center justify-center text-[#10B981] flex-shrink-0">
+                  {progressStage === 'upload' && <UploadCloud className="w-5 h-5 animate-pulse" />}
+                  {progressStage === 'transcription' && <Sparkles className="w-5 h-5 animate-spin" />}
+                  {progressStage === 'extraction' && <Layers className="w-5 h-5 animate-pulse" />}
+                  {progressStage === 'done' && <CheckCircle2 className="w-5 h-5 text-[#10B981]" />}
+                </div>
+                <div>
+                  <span className="text-[11px] uppercase tracking-wider font-semibold text-[#10B981]">
+                    {progressStage === 'upload' && 'Fase 1 de 3 · Upload do Vídeo'}
+                    {progressStage === 'transcription' && 'Fase 2 de 3 · Transcrição de Fala'}
+                    {progressStage === 'extraction' && 'Fase 3 de 3 · Extração & Similaridade de Telas'}
+                    {progressStage === 'done' && 'Concluído · Preparando Auditoria'}
+                  </span>
+                  <p className="text-[14px] font-medium text-[#111827] mt-0.5">{progressMessage}</p>
+                </div>
+              </div>
+
+              <div className="text-right">
+                <span className="text-[22px] font-bold font-mono text-[#111827] leading-none">
+                  {progressPercent}%
+                </span>
+              </div>
+            </div>
+
+            {/* Barra de Progresso com Gradiente Esmeralda */}
+            <div className="w-full bg-[#F3F4F6] rounded-full h-3 overflow-hidden p-0.5">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[#10B981] to-[#059669] transition-all duration-300 ease-out"
+                style={{ width: `${Math.max(4, Math.min(100, progressPercent))}%` }}
+              />
+            </div>
+
+            {/* Rodapé explicativo */}
+            <div className="flex items-center justify-between text-[12px] text-[#9CA3AF] pt-1 border-t border-[#F3F4F6]">
+              <span>
+                {progressStage === 'transcription'
+                  ? 'Identificando falas e gerando timestamps sincronizados'
+                  : progressStage === 'extraction'
+                  ? 'Comparando similaridade e filtrando telas duplicadas'
+                  : 'Transmitindo vídeo de treinamento para o servidor...'}
+              </span>
+              <span className="font-medium text-[#6B7280]">
+                {progressPercent < 100 ? 'Processamento local' : 'Finalizando...'}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* CTA */}
         <button
           onClick={handleProcess}
           disabled={!videoFile || loading}
-          className={`w-full mt-5 py-4 rounded-xl text-[15px] font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
+          className={`w-full mt-4 py-4 rounded-xl text-[15px] font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
             loading
               ? 'bg-[#1F2937] text-white opacity-90 cursor-wait'
               : videoFile
@@ -137,7 +206,7 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
           {loading ? (
             <>
               <Loader className="w-5 h-5 animate-spin" />
-              <span>{loadingText}</span>
+              <span>Processando... ({progressPercent}%)</span>
             </>
           ) : (
             ctaLabel

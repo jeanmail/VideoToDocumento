@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, ZoomIn, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { X, ZoomIn } from 'lucide-react';
 import { FrameItem, api } from '../api';
 
 type FilterType = 'approved' | 'all';
@@ -20,7 +20,6 @@ export function Step2Audit({ initialFrames, onAdvance, onBack }: Step2Props) {
   const [perPage] = useState(12);
   const [zoom, setZoom] = useState<FrameItem | null>(null);
   const [similarityThreshold, setSimilarityThreshold] = useState(85);
-  const [prefsOpen, setPrefsOpen] = useState(false);
 
   // Aplica o limiar de similaridade de forma reativa conforme a spec
   const effectiveFrames = frames.map(f => {
@@ -162,32 +161,23 @@ export function Step2Audit({ initialFrames, onAdvance, onBack }: Step2Props) {
         </div>
       </div>
 
-      {/* Similarity threshold strip */}
-      <div className="bg-[#FAFBFD] border-b border-[#E5E7EB] px-8 py-2 flex items-center justify-between text-[12px]">
-        <button
-          onClick={() => setPrefsOpen(!prefsOpen)}
-          className="flex items-center gap-1.5 text-[#6B7280] hover:text-[#111827] transition-colors"
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          <span>Ajustar filtro de similaridade</span>
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${prefsOpen ? 'rotate-180' : ''}`} />
-        </button>
-
-        {prefsOpen && (
-          <div className="flex items-center gap-4">
-            <span className="text-[#9CA3AF]">Limiar de telas repetidas:</span>
-            <input
-              type="range"
-              min="70"
-              max="98"
-              step="1"
-              value={similarityThreshold}
-              onChange={(e) => handleThresholdChange(parseInt(e.target.value))}
-              className="w-36 accent-[#10B981] cursor-pointer"
-            />
-            <span className="font-mono text-[12px] text-[#10B981] font-medium">{similarityThreshold}%</span>
-          </div>
-        )}
+      {/* Similarity threshold strip - Fixo e alinhado à direita */}
+      <div className="bg-[#FAFBFD] border-b border-[#E5E7EB] px-8 py-2 flex items-center justify-end text-[12px]">
+        <div className="flex items-center gap-3">
+          <span className="text-[#6B7280] font-medium">Ajustar Similaridade de Telas:</span>
+          <input
+            type="range"
+            min="70"
+            max="98"
+            step="1"
+            value={similarityThreshold}
+            onChange={(e) => handleThresholdChange(parseInt(e.target.value))}
+            className="w-36 accent-[#10B981] cursor-pointer"
+          />
+          <span className="font-mono text-[12px] text-[#10B981] font-semibold w-8 text-right">
+            {similarityThreshold}%
+          </span>
+        </div>
       </div>
 
       {/* Grid */}

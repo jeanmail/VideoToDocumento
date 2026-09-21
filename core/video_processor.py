@@ -5,7 +5,7 @@ Processador de vídeo: extração de frames, cálculo de similaridade e detecç�
 from dataclasses import dataclass
 import os
 import uuid
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Callable
 import cv2
 import numpy as np
 from PIL import Image
@@ -215,7 +215,8 @@ class VideoProcessor:
         output_dir: str,
         min_interval_seconds: float = 2.0,
         similarity_threshold: float = 0.88,
-        capture_offset_ratio: float = 0.2
+        capture_offset_ratio: float = 0.2,
+        progress_callback: Optional[Callable[[float, str], None]] = None
     ) -> List[ExtractedFrame]:
         """
         Percorre os itens de legenda, extrai os frames no momento ideal e
@@ -227,8 +228,12 @@ class VideoProcessor:
         results: List[ExtractedFrame] = []
         last_extracted_time = -9999.0
         last_hash: Optional[int] = None
+        total_subs = len(subtitles)
 
         for idx, sub in enumerate(subtitles):
+            if progress_callback and total_subs > 0:
+                progress_callback((idx + 1) / float(total_subs), f"Extraindo e analisando telas ({idx + 1}/{total_subs})...")
+
             # Calcula o momento ideal de captura (um pouco após o início para evitar cortes de cena em transição)
             target_time = sub.start_seconds + (sub.duration_seconds * capture_offset_ratio)
             

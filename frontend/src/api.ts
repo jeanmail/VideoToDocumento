@@ -55,7 +55,8 @@ export const api = {
     subtitleFile?: File | null,
     language = 'pt',
     minInterval = 2.5,
-    similarityThreshold = 88
+    similarityThreshold = 88,
+    onProgress?: (progress: number, message: string, stage: string) => void
   ): Promise<ExtractResponse> {
     const formData = new FormData();
     formData.append('video', videoFile);
@@ -66,17 +67,83 @@ export const api = {
     formData.append('min_interval', minInterval.toString());
     formData.append('similarity_threshold', similarityThreshold.toString());
 
-    const res = await fetch(`${API_BASE}/extract`, {
-      method: 'POST',
-      body: formData,
-    });
+    // 1. Envio do vídeo com acompanhamento de upload via XMLHttpRequest
+    const jobData: { job_id?: string; status?: string } & Partial<ExtractResponse> = await new Promise(
+      (resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE}/extract`);
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Erro no processamento do vídeo' }));
-      throw new Error(err.detail || 'Falha ao processar vídeo');
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const uploadPct = Math.round((e.loaded / e.total) * 100);
+            onProgress?.(
+              Math.min(5, Math.round(uploadPct * 0.05)),
+              `Enviando vídeo para o servidor (${uploadPct}%)...`,
+              'upload'
+            );
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              resolve(data);
+            } catch {
+              reject(new Error('Resposta inválida do servidor ao iniciar processamento'));
+            }
+          } else {
+            try {
+              const err = JSON.parse(xhr.responseText);
+              reject(new Error(err.detail || 'Falha ao iniciar processamento'));
+            } catch {
+              reject(new Error(`Erro no servidor (${xhr.status})`));
+            }
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Falha de conexão com o servidor'));
+        xhr.send(formData);
+      }
+    );
+
+    // Se o backend respondeu de forma síncrona diretamente
+    if (!jobData.job_id && (jobData as ExtractResponse).frames) {
+      onProgress?.(100, 'Processamento concluído!', 'done');
+      return jobData as ExtractResponse;
     }
 
-    return res.json();
+    const jobId = jobData.job_id!;
+
+    // 2. Polling contínuo do progresso da transcrição e extração
+    return new Promise((resolve, reject) => {
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch(`${API_BASE}/extract/progress/${jobId}`);
+          if (!res.ok) {
+            clearInterval(interval);
+            reject(new Error('Erro ao acompanhar progresso do processamento'));
+            return;
+          }
+
+          const job = await res.json();
+          const percent = Math.min(100, Math.max(5, Math.round((job.progress || 0) * 100)));
+          onProgress?.(percent, job.message || 'Processando...', job.stage || 'transcription');
+
+          if (job.status === 'completed') {
+            clearInterval(interval);
+            onProgress?.(100, 'Processamento concluído com sucesso!', 'done');
+            resolve(job.result);
+          } else if (job.status === 'error') {
+            clearInterval(interval);
+            reject(new Error(job.error || 'Erro durante a transcrição ou extração'));
+          }
+        } catch (err) {
+          clearInterval(interval);
+          reject(err);
+        }
+      }, 400);
+    });
   },
 
   async adjustFrameTime(frameId: string, deltaSeconds: number): Promise<{ success: boolean; frame: FrameItem }> {
