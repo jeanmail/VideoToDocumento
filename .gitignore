@@ -6,3 +6,6 @@ storage/temp_uploads/*
 storage/extracted_frames/*
 storage/outputs/*
 !storage/**/.gitkeep
+figma/
+frontend/node_modules/
+frontend/dist/

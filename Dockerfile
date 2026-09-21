@@ -1,12 +1,27 @@
 # syntax=docker/dockerfile:1
+
+# ── Stage 1: Build do Frontend React com Node 20 ──────────────────
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+
+# Copia package.json e instala dependências
+COPY frontend/package.json ./
+RUN npm install
+
+# Copia o código-fonte do frontend e compila o bundle estático
+COPY frontend/ ./
+RUN npm run build
+
+
+# ── Stage 2: Imagem final em Python com FastAPI e Motores IA ──────
 FROM python:3.11-slim
 
-# Evita criação de arquivos .pyc e garante logs em tempo real
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# Instala dependências de sistema necessárias para OpenCV, FFmpeg e fontes
+# Dependências de sistema para OpenCV e FFmpeg
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsm6 \
@@ -18,23 +33,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Instala dependências do Python primeiro para otimizar cache de camadas
+# Instala dependências Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copia todo o código-fonte da aplicação
+# Copia código do backend e motores
 COPY . .
 
-# Garante a existência dos diretórios de storage com permissões
+# Copia o frontend compilado do Stage 1 para servir via FastAPI
+COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
+
+# Cria diretórios de armazenamento
 RUN mkdir -p storage/temp_uploads storage/extracted_frames storage/outputs
 
-# Expõe a porta padrão do Streamlit
+# Porta de serviço (mantém 8501 para compatibilidade com o Render)
 EXPOSE 8501
 
-# Healthcheck do container
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+    CMD curl -f http://localhost:8501/api/health || exit 1
 
-# Comando padrão de inicialização
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.enableCORS=false", "--server.enableXsrfProtection=false"]
+# Inicializa o servidor FastAPI servindo o React na porta 8501
+CMD ["uvicorn", "server.py:app", "--host", "0.0.0.0", "--port", "8501"]
