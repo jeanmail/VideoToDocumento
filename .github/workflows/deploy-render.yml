@@ -1,0 +1,43 @@
+name: CD - Deploy to Render
+
+on:
+  workflow_run:
+    workflows: ["CI/CD Pipeline - Build Docker & Tests"]
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch: # Permite disparo manual caso queira forçar um redeploy
+
+jobs:
+  deploy-render:
+    name: Trigger Render Deployment Hook
+    # Só executa se o workflow de build do Docker concluiu com sucesso
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Invoke Render Deploy Hook
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "❌ ERRO: A secret 'RENDER_DEPLOY_HOOK_URL' não está configurada no GitHub!"
+            echo "ℹ️  Acesse: Settings -> Secrets and variables -> Actions -> New repository secret"
+            echo "ℹ️  Nome: RENDER_DEPLOY_HOOK_URL"
+            echo "ℹ️  Valor: URL do Deploy Hook gerada no painel do seu serviço no Render.com"
+            exit 1
+          fi
+
+          echo "🚀 Disparando novo deploy no Render.com..."
+          response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$RENDER_DEPLOY_HOOK_URL")
+          http_status=$(echo "$response" | grep "HTTP_STATUS" | cut -d':' -f2)
+          body=$(echo "$response" | grep -v "HTTP_STATUS")
+
+          echo "Resposta do Render: $body"
+          if [ "$http_status" -ge 200 ] && [ "$http_status" -lt 300 ]; then
+            echo "✅ Deploy disparado com sucesso no Render.com (HTTP $http_status)!"
+          else
+            echo "❌ Falha ao acionar Deploy Hook no Render (HTTP $http_status)"
+            exit 1
+          fi

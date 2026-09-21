@@ -1,0 +1,9 @@
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+storage/temp_uploads/*
+storage/extracted_frames/*
+storage/outputs/*
+!storage/**/.gitkeep

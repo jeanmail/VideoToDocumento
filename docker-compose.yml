@@ -1,0 +1,101 @@
+version: '3.9'
+
+services:
+  videotodocumento:
+    image: videotodocumento:2.0.0
+    container_name: videotodocumento-app
+
+    ports:
+      - "9999:8501"
+
+    environment:
+      # Python
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
+      PYTHONPATH: '/app'
+
+      # Storage
+      STORAGE_PATH: '/app/storage'
+      TEMP_UPLOADS_PATH: '/app/storage/temp_uploads'
+      EXTRACTED_FRAMES_PATH: '/app/storage/extracted_frames'
+      OUTPUTS_PATH: '/app/storage/outputs'
+
+      # Processing
+      MAX_VIDEO_SIZE_MB: '500'
+      FRAME_QUALITY: '85'
+      VIDEO_CODEC: 'h264'
+      MIN_INTERVAL: '2.5'
+      SIMILARITY_THRESHOLD: '88.0'
+
+      # Whisper
+      WHISPER_MODEL: 'base'
+      WHISPER_LANGUAGE: 'pt'
+
+      # FastAPI
+      UVICORN_HOST: '0.0.0.0'
+      UVICORN_PORT: '8501'
+      UVICORN_WORKERS: '1'
+
+      # CORS
+      CORS_ORIGINS: '*'
+
+      # Google Cloud Storage
+      GCS_BUCKET_NAME: 'kb-contact-center-vertex'
+
+      # AWS
+      AWS_DEFAULT_REGION: 'us-east-1'
+
+      # OCR
+      ENABLE_OCR: 'true'
+      OCR_LANGUAGE: 'pt-br'
+
+      # Logging
+      LOG_LEVEL: 'INFO'
+      LOG_FILE: '/app/logs/videotodocumento.log'
+
+      # Environment
+      ENVIRONMENT: 'production'
+      DEBUG: 'false'
+
+    volumes:
+      - videotodocumento-uploads:/app/storage/temp_uploads
+      - videotodocumento-frames:/app/storage/extracted_frames
+      - videotodocumento-outputs:/app/storage/outputs
+      - videotodocumento-logs:/app/logs
+      - videotodocumento-data:/app/data
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 6G
+        reservations:
+          cpus: '1'
+          memory: 6G
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+volumes:
+  videotodocumento-uploads:
+    driver: local
+  videotodocumento-frames:
+    driver: local
+  videotodocumento-outputs:
+    driver: local
+  videotodocumento-logs:
+    driver: local
+  videotodocumento-data:
+    driver: local

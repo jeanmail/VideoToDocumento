@@ -1,0 +1,3 @@
+"""
+Módulos centrais do VideoToDocument.
+"""
