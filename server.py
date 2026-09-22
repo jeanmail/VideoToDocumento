@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 import zipfile
 import logging
@@ -258,6 +259,26 @@ def run_extraction_worker(
         extraction_jobs[job_id]["message"] = "Processamento concluído com sucesso!"
         extraction_jobs[job_id]["result"] = result_payload
         logger.info(f"🎉 [WORKER-COMPLETE] job_id={job_id} | status=completed | frames={len(extracted)}")
+
+        # Schedule limpeza do vídeo temporário após 10 minutos
+        def cleanup_temp_video(video_path: str, job_id_ref: str, delay_seconds: int = 600):
+            try:
+                time.sleep(delay_seconds)
+                if os.path.exists(video_path):
+                    os.remove(video_path)
+                    logger.info(f"🗑️ [CLEANUP] Vídeo temporário deletado | job_id={job_id_ref} | path={video_path}")
+                else:
+                    logger.debug(f"⚠️ [CLEANUP] Vídeo já não existe | job_id={job_id_ref} | path={video_path}")
+            except Exception as cleanup_err:
+                logger.error(f"❌ [CLEANUP-ERROR] Erro ao limpar vídeo | job_id={job_id_ref} | error={str(cleanup_err)}")
+
+        cleanup_thread = threading.Thread(
+            target=cleanup_temp_video,
+            args=(saved_video, job_id),
+            daemon=True
+        )
+        cleanup_thread.start()
+        logger.debug(f"⏰ [CLEANUP-SCHEDULED] Limpeza agendada em 10min | job_id={job_id} | video={saved_video}")
 
     except Exception as exc:
         logger.error(f"❌ [WORKER-ERROR] job_id={job_id} | error={str(exc)}")
