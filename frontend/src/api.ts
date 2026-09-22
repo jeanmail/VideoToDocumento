@@ -211,7 +211,7 @@ export const api = {
           if (job.status === 'completed') {
             cleanup();
             onProgress?.(100, 'Processamento concluído com sucesso!', 'done');
-            resolve(job.result);
+            resolve({ ...job.result, job_id: jobId });
           } else if (job.status === 'cancelled') {
             cleanup();
             reject(new ExtractError('Processamento suspenso pelo usuário.'));
