@@ -39,6 +39,7 @@ export interface PublishRequest {
   product_slug: string;
   bucket_name?: string;
   selected_frame_ids: string[];
+  job_id?: string;
 }
 
 export interface PublishResponse {
@@ -245,26 +246,29 @@ export const api = {
     return res.json();
   },
 
-  getDocxDownloadUrl(title: string, selectedFrameIds: string[]): string {
+  getDocxDownloadUrl(title: string, selectedFrameIds: string[], jobId: string): string {
     const params = new URLSearchParams({
       title,
       frame_ids: selectedFrameIds.join(','),
+      job_id: jobId,
     });
     return `${API_BASE}/export/docx?${params.toString()}`;
   },
 
-  getPdfDownloadUrl(title: string, selectedFrameIds: string[]): string {
+  getPdfDownloadUrl(title: string, selectedFrameIds: string[], jobId: string): string {
     const params = new URLSearchParams({
       title,
       frame_ids: selectedFrameIds.join(','),
+      job_id: jobId,
     });
     return `${API_BASE}/export/pdf?${params.toString()}`;
   },
 
-  getZipDownloadUrl(title: string, selectedFrameIds: string[]): string {
+  getZipDownloadUrl(title: string, selectedFrameIds: string[], jobId: string): string {
     const params = new URLSearchParams({
       title,
       frame_ids: selectedFrameIds.join(','),
+      job_id: jobId,
     });
     return `${API_BASE}/export/zip?${params.toString()}`;
   },

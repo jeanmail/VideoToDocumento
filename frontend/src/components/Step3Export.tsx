@@ -16,9 +16,10 @@ interface Step3Props {
   onBack: () => void;
   videoName?: string;
   selectedFrameIds: string[];
+  jobId: string;
 }
 
-export function Step3Export({ onBack, videoName = '', selectedFrameIds }: Step3Props) {
+export function Step3Export({ onBack, videoName = '', selectedFrameIds, jobId }: Step3Props) {
   const [title, setTitle] = useState(videoName || 'Guia de Treinamento');
   const [description, setDescription] = useState('');
   const [product, setProduct] = useState('');
@@ -33,9 +34,9 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds }: Step3P
   const handleDownload = (format: 'docx' | 'pdf' | 'zip') => {
     setGenerating(format);
     let url = '';
-    if (format === 'docx') url = api.getDocxDownloadUrl(title, selectedFrameIds);
-    else if (format === 'pdf') url = api.getPdfDownloadUrl(title, selectedFrameIds);
-    else if (format === 'zip') url = api.getZipDownloadUrl(title, selectedFrameIds);
+    if (format === 'docx') url = api.getDocxDownloadUrl(title, selectedFrameIds, jobId);
+    else if (format === 'pdf') url = api.getPdfDownloadUrl(title, selectedFrameIds, jobId);
+    else if (format === 'zip') url = api.getZipDownloadUrl(title, selectedFrameIds, jobId);
 
     // Dispara download no navegador
     const a = document.createElement('a');
@@ -63,6 +64,7 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds }: Step3P
         product_slug: product,
         bucket_name: 'kb-contact-center-vertex',
         selected_frame_ids: selectedFrameIds,
+        job_id: jobId,
       });
 
       if (res.success) {

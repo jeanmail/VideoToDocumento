@@ -11,11 +11,13 @@ export default function App() {
   const [videoName, setVideoName] = useState('');
   const [frames, setFrames] = useState<FrameItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [jobId, setJobId] = useState<string>('');
 
   const handleExtractSuccess = (res: ExtractResponse) => {
     setVideoName(res.video_name);
     setFrames(res.frames);
     setSelectedIds(res.frames.filter(f => f.selected).map(f => f.id));
+    setJobId((res as any).job_id || '');
     setCompleted(prev => prev.includes(1) ? prev : [...prev, 1]);
     setStep(2);
   };
@@ -34,6 +36,7 @@ export default function App() {
     setVideoName('');
     setFrames([]);
     setSelectedIds([]);
+    setJobId('');
   };
 
   return (
@@ -54,6 +57,7 @@ export default function App() {
             onBack={back}
             videoName={videoName}
             selectedFrameIds={selectedIds}
+            jobId={jobId}
           />
         )}
       </main>
