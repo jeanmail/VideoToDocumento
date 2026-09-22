@@ -47,6 +47,19 @@ export interface PublishResponse {
   message: string;
 }
 
+export class ExtractError extends Error {
+  details?: string;
+  constructor(message: string, details?: string) {
+    super(message);
+    this.name = 'ExtractError';
+    this.details = details;
+  }
+}
+
+export interface ExtractController {
+  abort: () => void;
+}
+
 const API_BASE = '/api';
 
 export const api = {
@@ -56,7 +69,8 @@ export const api = {
     language = 'pt',
     minInterval = 2.5,
     similarityThreshold = 88,
-    onProgress?: (progress: number, message: string, stage: string) => void
+    onProgress?: (progress: number, message: string, stage: string) => void,
+    controllerRef?: { current?: ExtractController }
   ): Promise<ExtractResponse> {
     const formData = new FormData();
     formData.append('video', videoFile);
@@ -67,14 +81,42 @@ export const api = {
     formData.append('min_interval', minInterval.toString());
     formData.append('similarity_threshold', similarityThreshold.toString());
 
+    let activeXhr: XMLHttpRequest | null = null;
+    let activeInterval: any = null;
+    let activeJobId: string | null = null;
+    let isCancelled = false;
+
+    const cleanup = () => {
+      if (activeInterval) {
+        clearInterval(activeInterval);
+        activeInterval = null;
+      }
+    };
+
+    if (controllerRef) {
+      controllerRef.current = {
+        abort: () => {
+          isCancelled = true;
+          cleanup();
+          if (activeXhr) {
+            try { activeXhr.abort(); } catch {}
+          }
+          if (activeJobId) {
+            fetch(`${API_BASE}/extract/cancel/${activeJobId}`, { method: 'POST' }).catch(() => {});
+          }
+        }
+      };
+    }
+
     // 1. Envio do vídeo com acompanhamento de upload via XMLHttpRequest
     const jobData: { job_id?: string; status?: string } & Partial<ExtractResponse> = await new Promise(
       (resolve, reject) => {
         const xhr = new XMLHttpRequest();
+        activeXhr = xhr;
         xhr.open('POST', `${API_BASE}/extract`);
 
         xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
+          if (e.lengthComputable && !isCancelled) {
             const uploadPct = Math.round((e.loaded / e.total) * 100);
             onProgress?.(
               Math.min(5, Math.round(uploadPct * 0.05)),
@@ -85,27 +127,51 @@ export const api = {
         };
 
         xhr.onload = () => {
+          activeXhr = null;
+          if (isCancelled) {
+            return reject(new ExtractError('Processamento suspenso pelo usuário.'));
+          }
+
           if (xhr.status >= 200 && xhr.status < 300) {
             try {
               const data = JSON.parse(xhr.responseText);
               resolve(data);
             } catch {
-              reject(new Error('Resposta inválida do servidor ao iniciar processamento'));
+              reject(new ExtractError('Resposta inválida do servidor ao iniciar processamento'));
             }
           } else {
             try {
               const err = JSON.parse(xhr.responseText);
-              reject(new Error(err.detail || 'Falha ao iniciar processamento'));
+              const msg = typeof err.detail === 'object' && err.detail?.message ? err.detail.message : (err.detail || 'Falha ao iniciar processamento');
+              const det = typeof err.detail === 'object' && err.detail?.details ? err.detail.details : (typeof err.detail === 'string' ? err.detail : undefined);
+              reject(new ExtractError(msg, det));
             } catch {
-              reject(new Error(`Erro no servidor (${xhr.status})`));
+              reject(new ExtractError(`Erro no servidor (HTTP ${xhr.status})`));
             }
           }
         };
 
-        xhr.onerror = () => reject(new Error('Falha de conexão com o servidor'));
+        xhr.onerror = () => {
+          activeXhr = null;
+          if (isCancelled) {
+            reject(new ExtractError('Processamento suspenso pelo usuário.'));
+          } else {
+            reject(new ExtractError('Falha de conexão com o servidor'));
+          }
+        };
+
+        xhr.onabort = () => {
+          activeXhr = null;
+          reject(new ExtractError('Processamento suspenso pelo usuário.'));
+        };
+
         xhr.send(formData);
       }
     );
+
+    if (isCancelled) {
+      throw new ExtractError('Processamento suspenso pelo usuário.');
+    }
 
     // Se o backend respondeu de forma síncrona diretamente
     if (!jobData.job_id && (jobData as ExtractResponse).frames) {
@@ -114,36 +180,58 @@ export const api = {
     }
 
     const jobId = jobData.job_id!;
+    activeJobId = jobId;
 
     // 2. Polling contínuo do progresso da transcrição e extração
     return new Promise((resolve, reject) => {
-      const interval = setInterval(async () => {
+      activeInterval = setInterval(async () => {
+        if (isCancelled) {
+          cleanup();
+          return reject(new ExtractError('Processamento suspenso pelo usuário.'));
+        }
+
         try {
           const res = await fetch(`${API_BASE}/extract/progress/${jobId}`);
           if (!res.ok) {
-            clearInterval(interval);
-            reject(new Error('Erro ao acompanhar progresso do processamento'));
+            cleanup();
+            reject(new ExtractError(`Falha ao consultar progresso (HTTP ${res.status})`));
             return;
           }
 
           const job = await res.json();
+          if (isCancelled) {
+            cleanup();
+            return reject(new ExtractError('Processamento suspenso pelo usuário.'));
+          }
+
           const percent = Math.min(100, Math.max(5, Math.round((job.progress || 0) * 100)));
           onProgress?.(percent, job.message || 'Processando...', job.stage || 'transcription');
 
           if (job.status === 'completed') {
-            clearInterval(interval);
+            cleanup();
             onProgress?.(100, 'Processamento concluído com sucesso!', 'done');
             resolve(job.result);
+          } else if (job.status === 'cancelled') {
+            cleanup();
+            reject(new ExtractError('Processamento suspenso pelo usuário.'));
           } else if (job.status === 'error') {
-            clearInterval(interval);
-            reject(new Error(job.error || 'Erro durante a transcrição ou extração'));
+            cleanup();
+            reject(new ExtractError(job.message || job.error || 'Erro durante o processamento do vídeo', job.details || job.error));
           }
-        } catch (err) {
-          clearInterval(interval);
-          reject(err);
+        } catch (err: any) {
+          cleanup();
+          if (isCancelled) {
+            reject(new ExtractError('Processamento suspenso pelo usuário.'));
+          } else {
+            reject(err instanceof ExtractError ? err : new ExtractError(err.message || 'Erro de comunicação', err.stack));
+          }
         }
       }, 400);
     });
+  },
+
+  async cancelExtraction(jobId: string): Promise<void> {
+    await fetch(`${API_BASE}/extract/cancel/${jobId}`, { method: 'POST' }).catch(() => {});
   },
 
   async adjustFrameTime(frameId: string, deltaSeconds: number): Promise<{ success: boolean; frame: FrameItem }> {
