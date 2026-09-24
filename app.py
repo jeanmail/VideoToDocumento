@@ -147,7 +147,12 @@ with st.sidebar:
 
     # Informações de Versão e Build no rodapé da barra lateral
     st.markdown("---")
-    APP_VERSION = "v1.2.0"
+    version_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+    try:
+        with open(version_file, "r", encoding="utf-8") as _vf:
+            APP_VERSION = _vf.read().strip() or "v1.3.0"
+    except Exception:
+        APP_VERSION = "v1.3.0"
     st.markdown(
         f"<div style='text-align: center; color: #888888; font-size: 0.82em; padding: 6px 0;'>"
         f"<strong>Versão:</strong> <code>{APP_VERSION}</code><br>"

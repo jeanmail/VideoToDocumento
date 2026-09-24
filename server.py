@@ -30,6 +30,13 @@ from pydantic import BaseModel
 # Definir BASE_DIR ANTES de qualquer coisa
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+VERSION_FILE = os.path.join(BASE_DIR, "VERSION")
+try:
+    with open(VERSION_FILE, "r", encoding="utf-8") as _vf:
+        APP_VERSION = _vf.read().strip() or "v1.3.0"
+except Exception:
+    APP_VERSION = "v1.3.0"
+
 # Configurar logging
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -200,8 +207,8 @@ def frame_to_dict(f: ExtractedFrame, step_num: int) -> dict:
 
 @app.get("/api/health")
 def health_check():
-    logger.debug("🏥 [HEALTH-CHECK] Health check realizado")
-    return {"status": "ok", "version": "v1.2.0"}
+    logger.debug(f"🏥 [HEALTH-CHECK] Health check realizado | version={APP_VERSION}")
+    return {"status": "ok", "version": APP_VERSION}
 
 
 @app.get("/api/logs")

@@ -94,22 +94,22 @@ export function Step2Audit({ initialFrames, onAdvance, onBack }: Step2Props) {
     <div className="flex flex-col h-screen">
 
       {/* Top bar */}
-      <div className="bg-white border-b border-[#E5E7EB] px-8 py-4 flex items-center justify-between flex-shrink-0">
+      <div className="bg-white border-b border-[#E5E7EB] px-4 sm:px-6 md:px-8 py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-shrink-0">
         <div>
-          <h1 className="text-[17px] font-semibold text-[#111827]">Selecione os prints do treinamento</h1>
-          <p className="text-[13px] text-[#9CA3AF] mt-0.5">
+          <h1 className="text-[16px] sm:text-[17px] font-semibold text-[#111827]">Selecione os prints do treinamento</h1>
+          <p className="text-[12px] sm:text-[13px] text-[#9CA3AF] mt-0.5">
             {approvedCount} imagens únicas · {hiddenCount} similares/câmeras filtradas
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           {/* Filter toggle */}
           <div className="flex items-center bg-[#F3F4F6] rounded-lg p-0.5">
             <button
               onClick={() => { setFilter('approved'); setPage(1); }}
-              className={`px-3.5 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
+              className={`px-2.5 sm:px-3.5 py-1.5 rounded-md text-[11px] sm:text-[12px] font-medium transition-colors cursor-pointer ${
                 filter === 'approved'
-                  ? 'bg-white text-[#111827] shadow-xs'
+                  ? 'bg-white text-[#111827] shadow-xs font-semibold'
                   : 'text-[#6B7280] hover:text-[#111827]'
               }`}
             >
@@ -117,9 +117,9 @@ export function Step2Audit({ initialFrames, onAdvance, onBack }: Step2Props) {
             </button>
             <button
               onClick={() => { setFilter('all'); setPage(1); }}
-              className={`px-3.5 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
+              className={`px-2.5 sm:px-3.5 py-1.5 rounded-md text-[11px] sm:text-[12px] font-medium transition-colors cursor-pointer ${
                 filter === 'all'
-                  ? 'bg-white text-[#111827] shadow-xs'
+                  ? 'bg-white text-[#111827] shadow-xs font-semibold'
                   : 'text-[#6B7280] hover:text-[#111827]'
               }`}
             >
@@ -127,30 +127,30 @@ export function Step2Audit({ initialFrames, onAdvance, onBack }: Step2Props) {
             </button>
           </div>
 
-          <div className="h-4 w-px bg-[#E5E7EB]" />
+          <div className="hidden sm:block h-4 w-px bg-[#E5E7EB]" />
 
           {/* Batch actions */}
           <button
             onClick={selectAll}
-            className="text-[12px] text-[#6B7280] hover:text-[#111827] transition-colors"
+            className="text-[11px] sm:text-[12px] text-[#6B7280] hover:text-[#111827] transition-colors cursor-pointer"
           >
             Selecionar todas
           </button>
           <span className="text-[#D1D5DB]">·</span>
           <button
             onClick={deselectAll}
-            className="text-[12px] text-[#6B7280] hover:text-[#111827] transition-colors"
+            className="text-[11px] sm:text-[12px] text-[#6B7280] hover:text-[#111827] transition-colors cursor-pointer"
           >
             Desmarcar todas
           </button>
 
-          <div className="h-4 w-px bg-[#E5E7EB]" />
+          <div className="hidden sm:block h-4 w-px bg-[#E5E7EB]" />
 
           {/* Advance button */}
           <button
             onClick={() => onAdvance(Array.from(selected))}
             disabled={selected.size === 0}
-            className={`px-4 py-2 rounded-xl text-[13px] font-semibold transition-all ${
+            className={`w-full sm:w-auto px-4 py-2 rounded-xl text-[12px] sm:text-[13px] font-semibold transition-all cursor-pointer ${
               selected.size > 0
                 ? 'bg-[#111827] text-white hover:bg-[#1F2937]'
                 : 'bg-[#F3F4F6] text-[#C4C9D4] cursor-not-allowed'
@@ -161,28 +161,30 @@ export function Step2Audit({ initialFrames, onAdvance, onBack }: Step2Props) {
         </div>
       </div>
 
-      {/* Similarity threshold strip - Fixo e alinhado à direita */}
-      <div className="bg-[#FAFBFD] border-b border-[#E5E7EB] px-8 py-2 flex items-center justify-end text-[12px]">
-        <div className="flex items-center gap-3">
-          <span className="text-[#6B7280] font-medium">Ajustar Similaridade de Telas:</span>
-          <input
-            type="range"
-            min="70"
-            max="98"
-            step="1"
-            value={similarityThreshold}
-            onChange={(e) => handleThresholdChange(parseInt(e.target.value))}
-            className="w-36 accent-[#10B981] cursor-pointer"
-          />
-          <span className="font-mono text-[12px] text-[#10B981] font-semibold w-8 text-right">
-            {similarityThreshold}%
-          </span>
+      {/* Similarity threshold strip - Adaptativo */}
+      <div className="bg-[#FAFBFD] border-b border-[#E5E7EB] px-4 sm:px-6 md:px-8 py-2 flex flex-wrap items-center justify-between sm:justify-end gap-2 text-[12px]">
+        <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto justify-between sm:justify-end">
+          <span className="text-[#6B7280] font-medium text-[11px] sm:text-[12px]">Ajustar Similaridade:</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="range"
+              min="70"
+              max="98"
+              step="1"
+              value={similarityThreshold}
+              onChange={(e) => handleThresholdChange(parseInt(e.target.value))}
+              className="w-28 sm:w-36 accent-[#10B981] cursor-pointer"
+            />
+            <span className="font-mono text-[11px] sm:text-[12px] text-[#10B981] font-semibold w-8 text-right">
+              {similarityThreshold}%
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Grid */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        <div className="grid grid-cols-3 xl:grid-cols-4 gap-4">
+      {/* Grid: 1 col no mobile, 2 no tablet pequeno, 3 no tablet grande e 4 no desktop */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 md:px-8 py-4 sm:py-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
           {paginated.map((p) => {
             const isSelected = selected.has(p.id);
             const isSimilar = p.is_duplicate_candidate;
@@ -258,10 +260,10 @@ export function Step2Audit({ initialFrames, onAdvance, onBack }: Step2Props) {
       </div>
 
       {/* Pagination & Back */}
-      <div className="bg-white border-t border-[#E5E7EB] px-8 py-3 flex items-center justify-between flex-shrink-0">
+      <div className="bg-white border-t border-[#E5E7EB] px-4 sm:px-6 md:px-8 py-3 flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
         <button
           onClick={onBack}
-          className="text-[13px] text-[#9CA3AF] hover:text-[#374151] transition-colors"
+          className="text-[12px] sm:text-[13px] text-[#9CA3AF] hover:text-[#374151] transition-colors cursor-pointer"
         >
           ← Voltar ao upload
         </button>
@@ -271,17 +273,17 @@ export function Step2Audit({ initialFrames, onAdvance, onBack }: Step2Props) {
             <button
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="px-3 py-1 rounded-lg text-[12px] border border-[#E5E7EB] text-[#374151] disabled:opacity-40"
+              className="px-2.5 sm:px-3 py-1 rounded-lg text-[11px] sm:text-[12px] border border-[#E5E7EB] text-[#374151] disabled:opacity-40 cursor-pointer"
             >
               Anterior
             </button>
-            <span className="text-[12px] text-[#9CA3AF]">
+            <span className="text-[11px] sm:text-[12px] text-[#9CA3AF]">
               Página {page} de {totalPages}
             </span>
             <button
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-              className="px-3 py-1 rounded-lg text-[12px] border border-[#E5E7EB] text-[#374151] disabled:opacity-40"
+              className="px-2.5 sm:px-3 py-1 rounded-lg text-[11px] sm:text-[12px] border border-[#E5E7EB] text-[#374151] disabled:opacity-40 cursor-pointer"
             >
               Próxima
             </button>
@@ -293,26 +295,26 @@ export function Step2Audit({ initialFrames, onAdvance, onBack }: Step2Props) {
       {zoom && (
         <div
           onClick={() => setZoom(null)}
-          className="fixed inset-0 bg-black/70 flex items-center justify-center p-8 z-50 animate-in fade-in duration-150"
+          className="fixed inset-0 bg-black/70 flex items-center justify-center p-3 sm:p-6 md:p-8 z-50 animate-in fade-in duration-150"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col"
+            className="bg-white rounded-2xl max-w-3xl w-full max-h-[92vh] overflow-hidden shadow-2xl flex flex-col"
           >
-            <div className="px-6 py-4 border-b border-[#E5E7EB] flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold text-[#111827] text-[15px]">{zoom.step_title}</h3>
-                <span className="font-mono text-[11px] text-[#9CA3AF]">{zoom.timestamp_str}</span>
+            <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-[#E5E7EB] flex items-center justify-between flex-shrink-0">
+              <div className="pr-2 truncate">
+                <h3 className="font-semibold text-[#111827] text-[14px] sm:text-[15px] truncate">{zoom.step_title}</h3>
+                <span className="font-mono text-[10px] sm:text-[11px] text-[#9CA3AF]">{zoom.timestamp_str}</span>
               </div>
               <button
                 onClick={() => setZoom(null)}
-                className="w-8 h-8 rounded-lg hover:bg-[#F3F4F6] flex items-center justify-center text-[#9CA3AF] hover:text-[#111827]"
+                className="w-8 h-8 rounded-lg hover:bg-[#F3F4F6] flex items-center justify-center text-[#9CA3AF] hover:text-[#111827] flex-shrink-0 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="aspect-video bg-black flex items-center justify-center">
+            <div className="aspect-video bg-black flex items-center justify-center overflow-hidden">
               <img
                 src={zoom.image_url}
                 alt={zoom.step_title}
@@ -320,22 +322,22 @@ export function Step2Audit({ initialFrames, onAdvance, onBack }: Step2Props) {
               />
             </div>
 
-            <div className="px-6 py-4 bg-[#F9FAFB] border-t border-[#E5E7EB] flex flex-col gap-3">
+            <div className="px-4 sm:px-6 py-3 sm:py-4 bg-[#F9FAFB] border-t border-[#E5E7EB] flex flex-col gap-2.5 sm:gap-3 overflow-y-auto">
               {zoom.subtitle_text && (
                 <div>
-                  <p className="text-[11px] font-semibold text-[#9CA3AF] uppercase tracking-wider mb-1">Transcrição no momento:</p>
-                  <p className="text-[13px] text-[#374151] italic leading-relaxed">"{zoom.subtitle_text}"</p>
+                  <p className="text-[10px] sm:text-[11px] font-semibold text-[#9CA3AF] uppercase tracking-wider mb-1">Transcrição no momento:</p>
+                  <p className="text-[12px] sm:text-[13px] text-[#374151] italic leading-relaxed">"{zoom.subtitle_text}"</p>
                 </div>
               )}
 
               {/* Botões de ajuste fino no modal */}
-              <div className="flex items-center justify-between pt-2 border-t border-[#E5E7EB]">
-                <span className="text-[12px] text-[#6B7280]">Ajuste fino de tempo no vídeo:</span>
-                <div className="flex gap-2">
-                  <button onClick={() => handleTimeAdjust(zoom.id, -1.0)} className="px-2.5 py-1 text-[11px] font-medium bg-white border border-[#D1D5DB] rounded-md hover:bg-[#F3F4F6]">⏪ -1s</button>
-                  <button onClick={() => handleTimeAdjust(zoom.id, -0.5)} className="px-2.5 py-1 text-[11px] font-medium bg-white border border-[#D1D5DB] rounded-md hover:bg-[#F3F4F6]">◀ -0.5s</button>
-                  <button onClick={() => handleTimeAdjust(zoom.id, 0.5)} className="px-2.5 py-1 text-[11px] font-medium bg-white border border-[#D1D5DB] rounded-md hover:bg-[#F3F4F6]">+0.5s ▶</button>
-                  <button onClick={() => handleTimeAdjust(zoom.id, 1.0)} className="px-2.5 py-1 text-[11px] font-medium bg-white border border-[#D1D5DB] rounded-md hover:bg-[#F3F4F6]">+1s ⏩</button>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-[#E5E7EB]">
+                <span className="text-[11px] sm:text-[12px] text-[#6B7280]">Ajuste fino de tempo:</span>
+                <div className="grid grid-cols-4 sm:flex gap-1.5 sm:gap-2">
+                  <button onClick={() => handleTimeAdjust(zoom.id, -1.0)} className="px-2 py-1 text-[10px] sm:text-[11px] font-medium bg-white border border-[#D1D5DB] rounded-md hover:bg-[#F3F4F6] cursor-pointer text-center">⏪ -1s</button>
+                  <button onClick={() => handleTimeAdjust(zoom.id, -0.5)} className="px-2 py-1 text-[10px] sm:text-[11px] font-medium bg-white border border-[#D1D5DB] rounded-md hover:bg-[#F3F4F6] cursor-pointer text-center">◀ -0.5s</button>
+                  <button onClick={() => handleTimeAdjust(zoom.id, 0.5)} className="px-2 py-1 text-[10px] sm:text-[11px] font-medium bg-white border border-[#D1D5DB] rounded-md hover:bg-[#F3F4F6] cursor-pointer text-center">+0.5s ▶</button>
+                  <button onClick={() => handleTimeAdjust(zoom.id, 1.0)} className="px-2 py-1 text-[10px] sm:text-[11px] font-medium bg-white border border-[#D1D5DB] rounded-md hover:bg-[#F3F4F6] cursor-pointer text-center">+1s ⏩</button>
                 </div>
               </div>
             </div>

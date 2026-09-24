@@ -85,21 +85,21 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds, jobId }:
   const metaFilled = title.trim().length > 0;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-8 py-16">
+    <div className="min-h-full flex flex-col items-center justify-center px-4 sm:px-6 md:px-8 py-8 md:py-16">
       <div className="w-full max-w-xl">
 
         {/* Header */}
-        <div className="mb-10">
-          <h1 className="text-[28px] font-semibold text-[#111827] tracking-tight mb-2">
+        <div className="mb-6 md:mb-10 text-center sm:text-left">
+          <h1 className="text-[22px] sm:text-[26px] md:text-[28px] font-semibold text-[#111827] tracking-tight mb-2">
             Exporte o documento
           </h1>
-          <p className="text-[15px] text-[#9CA3AF]">
+          <p className="text-[14px] md:text-[15px] text-[#9CA3AF]">
             Preencha os dados e escolha o formato de saída.
           </p>
         </div>
 
         {/* Metadata */}
-        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-6 py-6 mb-6 flex flex-col gap-4">
+        <div className="bg-white border border-[#E5E7EB] rounded-2xl px-4 sm:px-6 py-4 sm:py-6 mb-5 sm:mb-6 flex flex-col gap-4">
           <div>
             <label className="block text-[12px] font-medium text-[#374151] mb-1.5">
               Título do documento <span className="text-[#EF4444]">*</span>
@@ -108,7 +108,7 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds, jobId }:
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Ex: Guia de Onboarding — Prescrição Digital"
-              className="w-full border border-[#E5E7EB] rounded-xl px-4 py-3 text-[14px] text-[#111827] placeholder:text-[#D1D5DB] focus:outline-none focus:ring-2 focus:ring-[#111827] focus:border-transparent transition-shadow"
+              className="w-full border border-[#E5E7EB] rounded-xl px-3.5 sm:px-4 py-2.5 sm:py-3 text-[13px] sm:text-[14px] text-[#111827] placeholder:text-[#D1D5DB] focus:outline-none focus:ring-2 focus:ring-[#111827] focus:border-transparent transition-shadow"
             />
           </div>
           <div>
@@ -118,7 +118,7 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds, jobId }:
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Descreva o conteúdo coberto neste treinamento..."
               rows={3}
-              className="w-full border border-[#E5E7EB] rounded-xl px-4 py-3 text-[14px] text-[#111827] placeholder:text-[#D1D5DB] focus:outline-none focus:ring-2 focus:ring-[#111827] focus:border-transparent transition-shadow resize-none"
+              className="w-full border border-[#E5E7EB] rounded-xl px-3.5 sm:px-4 py-2.5 sm:py-3 text-[13px] sm:text-[14px] text-[#111827] placeholder:text-[#D1D5DB] focus:outline-none focus:ring-2 focus:ring-[#111827] focus:border-transparent transition-shadow resize-none"
             />
           </div>
         </div>
@@ -181,7 +181,7 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds, jobId }:
             </button>
 
             {gcsExpanded && (
-              <div className="border-t border-[#EFF6FF] px-5 py-5 flex flex-col gap-4">
+              <div className="border-t border-[#EFF6FF] px-4 sm:px-5 py-4 sm:py-5 flex flex-col gap-4">
 
                 {/* Bucket name editable */}
                 <div>
@@ -193,7 +193,7 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds, jobId }:
                     value={bucketName}
                     onChange={(e) => setBucketName(e.target.value)}
                     placeholder="Ex: kb-contact-center"
-                    className="w-full border border-[#E5E7EB] rounded-xl px-4 py-2.5 text-[13px] font-mono text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-transparent transition-shadow"
+                    className="w-full border border-[#E5E7EB] rounded-xl px-4 py-2.5 text-[12px] sm:text-[13px] font-mono text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-transparent transition-shadow"
                   />
                   <p className="text-[11px] text-[#9CA3AF] mt-1">Bucket central onde serão criadas as pastas dos produtos.</p>
                 </div>
@@ -201,12 +201,12 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds, jobId }:
                 {/* Product */}
                 <div>
                   <label className="block text-[12px] font-medium text-[#374151] mb-2">Produto de destino</label>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {PRODUCTS.map((p) => (
                       <button
                         key={p.id}
                         onClick={() => setProduct(p.id)}
-                        className={`flex flex-col items-center gap-1 px-2 py-3 rounded-xl border text-center transition-all ${
+                        className={`flex flex-col items-center gap-1 px-2 py-3 rounded-xl border text-center transition-all cursor-pointer ${
                           product === p.id
                             ? 'border-[#3B82F6] bg-[#EFF6FF]'
                             : 'border-[#E5E7EB] bg-white hover:border-[#BFDBFE]'
@@ -288,20 +288,22 @@ interface ExportCardProps {
 
 function ExportCard({ icon, iconBg, label, sub, disabled, state, onClick }: ExportCardProps) {
   return (
-    <div className={`bg-white border border-[#E5E7EB] rounded-2xl px-5 py-4 flex items-center gap-4 transition-all ${
+    <div className={`bg-white border border-[#E5E7EB] rounded-2xl px-4 sm:px-5 py-3.5 sm:py-4 flex items-center justify-between gap-3 sm:gap-4 transition-all ${
       disabled ? 'opacity-40' : 'hover:border-[#9CA3AF] hover:shadow-sm'
     }`}>
-      <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center flex-shrink-0`}>
-        {icon}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-[14px] font-semibold text-[#111827]">{label}</p>
-        <p className="text-[12px] text-[#9CA3AF]">{sub}</p>
+      <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+        <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl ${iconBg} flex items-center justify-center flex-shrink-0`}>
+          {icon}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] sm:text-[14px] font-semibold text-[#111827] truncate">{label}</p>
+          <p className="text-[11px] sm:text-[12px] text-[#9CA3AF] line-clamp-1">{sub}</p>
+        </div>
       </div>
       <button
         onClick={onClick}
         disabled={disabled || state === 'loading'}
-        className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[13px] font-medium transition-all flex-shrink-0 ${
+        className={`flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-xl text-[12px] sm:text-[13px] font-medium transition-all flex-shrink-0 cursor-pointer ${
           state === 'done'
             ? 'bg-[#ECFDF5] text-[#065F46]'
             : state === 'loading'
@@ -312,11 +314,11 @@ function ExportCard({ icon, iconBg, label, sub, disabled, state, onClick }: Expo
         }`}
       >
         {state === 'done' ? (
-          <><CheckCircle className="w-4 h-4" /> Baixado</>
+          <><CheckCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> <span className="hidden xs:inline">Baixado</span></>
         ) : state === 'loading' ? (
-          <><Loader className="w-4 h-4 animate-spin" /> Gerando...</>
+          <><Loader className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" /> <span className="hidden xs:inline">Gerando...</span></>
         ) : (
-          <><Download className="w-4 h-4" /> Baixar</>
+          <><Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> <span>Baixar</span></>
         )}
       </button>
     </div>

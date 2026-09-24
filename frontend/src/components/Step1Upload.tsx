@@ -116,44 +116,44 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center px-8 py-16">
+    <div className="min-h-full flex flex-col items-center justify-center px-4 sm:px-6 md:px-8 py-8 md:py-16">
       <div className="w-full max-w-xl">
 
         {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-[28px] font-semibold text-[#111827] tracking-tight mb-2">
+        <div className="text-center mb-6 md:mb-8">
+          <h1 className="text-[22px] sm:text-[26px] md:text-[28px] font-semibold text-[#111827] tracking-tight mb-2">
             Carregue o vídeo de treinamento
           </h1>
-          <p className="text-[15px] text-[#9CA3AF]">
+          <p className="text-[14px] md:text-[15px] text-[#9CA3AF] max-w-md mx-auto">
             A transcrição e os prints serão extraídos automaticamente.
           </p>
         </div>
 
         {/* Seletor de Origem: Arquivo Local vs Link do Google Drive / Web */}
-        <div className="flex bg-[#F3F4F6] p-1 rounded-xl mb-5">
+        <div className="flex bg-[#F3F4F6] p-1 rounded-xl mb-5 gap-1">
           <button
             type="button"
             onClick={() => setSourceType('file')}
-            className={`flex-1 py-2 rounded-lg text-[13px] font-medium transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            className={`flex-1 py-2 px-2 rounded-lg text-[12px] sm:text-[13px] font-medium transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer ${
               sourceType === 'file'
                 ? 'bg-white text-[#111827] shadow-xs font-semibold'
                 : 'text-[#6B7280] hover:text-[#111827]'
             }`}
           >
-            <UploadCloud className="w-4 h-4" />
-            <span>Arquivo do Computador</span>
+            <UploadCloud className="w-4 h-4 flex-shrink-0" />
+            <span className="truncate">Arquivo Local</span>
           </button>
           <button
             type="button"
             onClick={() => setSourceType('link')}
-            className={`flex-1 py-2 rounded-lg text-[13px] font-medium transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            className={`flex-1 py-2 px-2 rounded-lg text-[12px] sm:text-[13px] font-medium transition-all flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer ${
               sourceType === 'link'
                 ? 'bg-white text-[#111827] shadow-xs font-semibold'
                 : 'text-[#6B7280] hover:text-[#111827]'
             }`}
           >
-            <Link className="w-4 h-4" />
-            <span>Link do Google Drive / Web</span>
+            <Link className="w-4 h-4 flex-shrink-0" />
+            <span className="truncate">Link Drive / Web</span>
           </button>
         </div>
 
@@ -180,17 +180,17 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
               onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
             />
 
-            <div className="px-8 py-12 flex flex-col items-center gap-4 text-center">
-              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors ${
+            <div className="px-4 sm:px-8 py-8 sm:py-12 flex flex-col items-center gap-3 sm:gap-4 text-center">
+              <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center transition-colors ${
                 videoFile ? 'bg-[#10B981]' : 'bg-[#F3F4F6]'
               }`}>
-                <UploadCloud className={`w-7 h-7 ${videoFile ? 'text-white' : 'text-[#9CA3AF]'}`} />
+                <UploadCloud className={`w-6 h-6 sm:w-7 sm:h-7 ${videoFile ? 'text-white' : 'text-[#9CA3AF]'}`} />
               </div>
 
               {videoFile ? (
-                <div>
-                  <p className="text-[16px] font-semibold text-[#111827]">{videoFile.name}</p>
-                  <p className="text-[13px] text-[#6B7280] mt-1">{fmt(videoFile.size)}</p>
+                <div className="max-w-full px-2">
+                  <p className="text-[15px] sm:text-[16px] font-semibold text-[#111827] truncate">{videoFile.name}</p>
+                  <p className="text-[12px] sm:text-[13px] text-[#6B7280] mt-1">{fmt(videoFile.size)}</p>
                   <button
                     onClick={(e) => { e.stopPropagation(); setVideoFile(null); }}
                     className="mt-3 text-[12px] text-[#9CA3AF] hover:text-[#EF4444] transition-colors underline underline-offset-2 cursor-pointer"
@@ -200,18 +200,18 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
                 </div>
               ) : (
                 <div>
-                  <p className="text-[15px] font-medium text-[#374151]">
+                  <p className="text-[14px] sm:text-[15px] font-medium text-[#374151]">
                     Arraste o arquivo aqui ou{' '}
                     <span className="text-[#10B981]">clique para selecionar</span>
                   </p>
-                  <p className="text-[12px] text-[#C4C9D4] mt-1.5">MP4, MKV, MOV, AVI, WEBM · até 10 GB</p>
+                  <p className="text-[11px] sm:text-[12px] text-[#C4C9D4] mt-1.5">MP4, MKV, MOV, AVI, WEBM · até 10 GB</p>
                 </div>
               )}
             </div>
           </div>
         ) : (
           /* Campo de Link Google Drive / URL */
-          <div className="p-6 bg-white border border-[#E5E7EB] rounded-2xl shadow-xs flex flex-col gap-3">
+          <div className="p-4 sm:p-6 bg-white border border-[#E5E7EB] rounded-2xl shadow-xs flex flex-col gap-3">
             <label className="text-[13px] font-semibold text-[#111827] flex items-center gap-1.5">
               <Link className="w-4 h-4 text-[#10B981]" />
               <span>Cole o link do vídeo</span>
@@ -221,9 +221,9 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
               placeholder="Ex: https://drive.google.com/file/d/19lyO6Mw9KUWjlTPE2eVOpyqLujnbcuMP/view"
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
-              className="w-full px-4 py-3 border border-[#E5E7EB] rounded-xl text-[14px] text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#10B981]/20 focus:border-[#10B981] transition-all"
+              className="w-full px-3.5 sm:px-4 py-2.5 sm:py-3 border border-[#E5E7EB] rounded-xl text-[13px] sm:text-[14px] text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#10B981]/20 focus:border-[#10B981] transition-all"
             />
-            <p className="text-[12px] text-[#6B7280]">
+            <p className="text-[11px] sm:text-[12px] text-[#6B7280]">
               💡 Suporta links de visualização ou download do <strong>Google Drive</strong> (o arquivo deve estar com acesso público ou <em>qualquer pessoa com o link</em>) e URLs web diretas.
             </p>
           </div>
