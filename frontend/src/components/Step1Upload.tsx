@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import {
   UploadCloud,
+  Link,
   SlidersHorizontal,
   ChevronDown,
   FileText,
@@ -21,7 +22,9 @@ interface Step1Props {
 }
 
 export function Step1Upload({ onExtractSuccess }: Step1Props) {
+  const [sourceType, setSourceType] = useState<'file' | 'link'>('file');
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoUrl, setVideoUrl] = useState('');
   const [dragging, setDragging] = useState(false);
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [language, setLanguage] = useState('pt');
@@ -45,10 +48,15 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file) setVideoFile(file);
+    if (file) {
+      setVideoFile(file);
+      setSourceType('file');
+    }
   };
 
   const fmt = (b: number) => b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : `${(b / 1e6).toFixed(1)} MB`;
+
+  const isReadyToProcess = sourceType === 'file' ? Boolean(videoFile) : Boolean(videoUrl.trim());
 
   const ctaLabel = subtitleFile
     ? 'Extrair prints com legenda fornecida'
@@ -66,7 +74,7 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
   };
 
   const handleProcess = async () => {
-    if (!videoFile || loading) return;
+    if (!isReadyToProcess || loading) return;
     setLoading(true);
     setErrorMsg(null);
     setErrorDetails(null);
@@ -74,22 +82,23 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
     setUserCancelledNotice(false);
     setProgressPercent(2);
     setProgressStage('upload');
-    setProgressMessage('Iniciando envio do vídeo...');
+    setProgressMessage(sourceType === 'link' ? 'Conectando ao link do vídeo...' : 'Iniciando envio do vídeo...');
 
     try {
-      const res = await api.extractVideo(
-        videoFile,
+      const res = await api.extractVideo({
+        videoFile: sourceType === 'file' ? videoFile : null,
+        videoUrl: sourceType === 'link' ? videoUrl.trim() : null,
         subtitleFile,
         language,
         minInterval,
-        88,
-        (percent, message, stage) => {
+        similarityThreshold: 88,
+        onProgress: (percent, message, stage) => {
           setProgressPercent(percent);
           setProgressMessage(message);
           setProgressStage(stage as any);
         },
         controllerRef
-      );
+      });
       onExtractSuccess(res);
     } catch (err: any) {
       if (err.message?.includes('suspenso') || err.name === 'AbortError') {
@@ -111,7 +120,7 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
       <div className="w-full max-w-xl">
 
         {/* Header */}
-        <div className="text-center mb-10">
+        <div className="text-center mb-8">
           <h1 className="text-[28px] font-semibold text-[#111827] tracking-tight mb-2">
             Carregue o vídeo de treinamento
           </h1>
@@ -120,57 +129,105 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
           </p>
         </div>
 
-        {/* Drop zone */}
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={handleDrop}
-          onClick={() => !videoFile && videoRef.current?.click()}
-          className={`relative rounded-2xl border-2 border-dashed transition-all duration-200 cursor-pointer ${
-            dragging
-              ? 'border-[#10B981] bg-[#ECFDF5] scale-[1.01]'
-              : videoFile
-              ? 'border-[#10B981] bg-[#F0FDF9] cursor-default'
-              : 'border-[#E5E7EB] bg-white hover:border-[#10B981] hover:bg-[#F9FAFB]'
-          }`}
-        >
-          <input
-            ref={videoRef}
-            type="file"
-            accept=".mp4,.mkv,.mov,.avi,.webm"
-            className="hidden"
-            onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
-          />
-
-          <div className="px-8 py-12 flex flex-col items-center gap-4 text-center">
-            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors ${
-              videoFile ? 'bg-[#10B981]' : 'bg-[#F3F4F6]'
-            }`}>
-              <UploadCloud className={`w-7 h-7 ${videoFile ? 'text-white' : 'text-[#9CA3AF]'}`} />
-            </div>
-
-            {videoFile ? (
-              <div>
-                <p className="text-[16px] font-semibold text-[#111827]">{videoFile.name}</p>
-                <p className="text-[13px] text-[#6B7280] mt-1">{fmt(videoFile.size)}</p>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setVideoFile(null); }}
-                  className="mt-3 text-[12px] text-[#9CA3AF] hover:text-[#EF4444] transition-colors underline underline-offset-2"
-                >
-                  Remover arquivo
-                </button>
-              </div>
-            ) : (
-              <div>
-                <p className="text-[15px] font-medium text-[#374151]">
-                  Arraste o arquivo aqui ou{' '}
-                  <span className="text-[#10B981]">clique para selecionar</span>
-                </p>
-                <p className="text-[12px] text-[#C4C9D4] mt-1.5">MP4, MKV, MOV, AVI, WEBM · até 10 GB</p>
-              </div>
-            )}
-          </div>
+        {/* Seletor de Origem: Arquivo Local vs Link do Google Drive / Web */}
+        <div className="flex bg-[#F3F4F6] p-1 rounded-xl mb-5">
+          <button
+            type="button"
+            onClick={() => setSourceType('file')}
+            className={`flex-1 py-2 rounded-lg text-[13px] font-medium transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              sourceType === 'file'
+                ? 'bg-white text-[#111827] shadow-xs font-semibold'
+                : 'text-[#6B7280] hover:text-[#111827]'
+            }`}
+          >
+            <UploadCloud className="w-4 h-4" />
+            <span>Arquivo do Computador</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSourceType('link')}
+            className={`flex-1 py-2 rounded-lg text-[13px] font-medium transition-all flex items-center justify-center gap-2 cursor-pointer ${
+              sourceType === 'link'
+                ? 'bg-white text-[#111827] shadow-xs font-semibold'
+                : 'text-[#6B7280] hover:text-[#111827]'
+            }`}
+          >
+            <Link className="w-4 h-4" />
+            <span>Link do Google Drive / Web</span>
+          </button>
         </div>
+
+        {/* Drop zone de Arquivo */}
+        {sourceType === 'file' ? (
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+            onClick={() => !videoFile && videoRef.current?.click()}
+            className={`relative rounded-2xl border-2 border-dashed transition-all duration-200 cursor-pointer ${
+              dragging
+                ? 'border-[#10B981] bg-[#ECFDF5] scale-[1.01]'
+                : videoFile
+                ? 'border-[#10B981] bg-[#F0FDF9] cursor-default'
+                : 'border-[#E5E7EB] bg-white hover:border-[#10B981] hover:bg-[#F9FAFB]'
+            }`}
+          >
+            <input
+              ref={videoRef}
+              type="file"
+              accept=".mp4,.mkv,.mov,.avi,.webm"
+              className="hidden"
+              onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
+            />
+
+            <div className="px-8 py-12 flex flex-col items-center gap-4 text-center">
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors ${
+                videoFile ? 'bg-[#10B981]' : 'bg-[#F3F4F6]'
+              }`}>
+                <UploadCloud className={`w-7 h-7 ${videoFile ? 'text-white' : 'text-[#9CA3AF]'}`} />
+              </div>
+
+              {videoFile ? (
+                <div>
+                  <p className="text-[16px] font-semibold text-[#111827]">{videoFile.name}</p>
+                  <p className="text-[13px] text-[#6B7280] mt-1">{fmt(videoFile.size)}</p>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setVideoFile(null); }}
+                    className="mt-3 text-[12px] text-[#9CA3AF] hover:text-[#EF4444] transition-colors underline underline-offset-2 cursor-pointer"
+                  >
+                    Remover arquivo
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-[15px] font-medium text-[#374151]">
+                    Arraste o arquivo aqui ou{' '}
+                    <span className="text-[#10B981]">clique para selecionar</span>
+                  </p>
+                  <p className="text-[12px] text-[#C4C9D4] mt-1.5">MP4, MKV, MOV, AVI, WEBM · até 10 GB</p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Campo de Link Google Drive / URL */
+          <div className="p-6 bg-white border border-[#E5E7EB] rounded-2xl shadow-xs flex flex-col gap-3">
+            <label className="text-[13px] font-semibold text-[#111827] flex items-center gap-1.5">
+              <Link className="w-4 h-4 text-[#10B981]" />
+              <span>Cole o link do vídeo</span>
+            </label>
+            <input
+              type="url"
+              placeholder="Ex: https://drive.google.com/file/d/19lyO6Mw9KUWjlTPE2eVOpyqLujnbcuMP/view"
+              value={videoUrl}
+              onChange={(e) => setVideoUrl(e.target.value)}
+              className="w-full px-4 py-3 border border-[#E5E7EB] rounded-xl text-[14px] text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#10B981]/20 focus:border-[#10B981] transition-all"
+            />
+            <p className="text-[12px] text-[#6B7280]">
+              💡 Suporta links de visualização ou download do <strong>Google Drive</strong> (o arquivo deve estar com acesso público ou <em>qualquer pessoa com o link</em>) e URLs web diretas.
+            </p>
+          </div>
+        )}
 
         {/* Notificação de cancelamento pelo usuário */}
         {userCancelledNotice && (
@@ -313,9 +370,9 @@ export function Step1Upload({ onExtractSuccess }: Step1Props) {
         ) : (
           <button
             onClick={handleProcess}
-            disabled={!videoFile}
+            disabled={!isReadyToProcess}
             className={`w-full mt-4 py-4 rounded-xl text-[15px] font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
-              videoFile
+              isReadyToProcess
                 ? 'bg-[#111827] text-white hover:bg-[#1F2937] shadow-sm hover:shadow cursor-pointer'
                 : 'bg-[#F3F4F6] text-[#C4C9D4] cursor-not-allowed'
             }`}

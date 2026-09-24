@@ -13,6 +13,10 @@ import uuid
 import zipfile
 import logging
 import traceback
+import urllib.request
+import urllib.parse
+import http.cookiejar
+import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Body
@@ -46,11 +50,12 @@ from core.transcriber import AudioTranscriber
 from core.gcs_publisher import GCSPublisher, SUPPORTED_PROJECTS, slugify_training_name
 STORAGE_DIR = os.path.join(BASE_DIR, "storage")
 TEMP_UPLOADS = os.path.join(STORAGE_DIR, "temp_uploads")
+CHUNK_UPLOADS = os.path.join(STORAGE_DIR, "chunk_uploads")
 EXTRACTED_FRAMES = os.path.join(STORAGE_DIR, "extracted_frames")
 OUTPUTS_DIR = os.path.join(STORAGE_DIR, "outputs")
 FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
 
-for d in [TEMP_UPLOADS, EXTRACTED_FRAMES, OUTPUTS_DIR]:
+for d in [TEMP_UPLOADS, CHUNK_UPLOADS, EXTRACTED_FRAMES, OUTPUTS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 app = FastAPI(title="VideoToDocument API", version="2.0.0")
@@ -67,6 +72,94 @@ app.add_middleware(
 
 # Monta armazenamento estático para que o frontend carregue os frames e thumbnails
 app.mount("/storage", StaticFiles(directory=STORAGE_DIR), name="storage")
+
+
+def extract_google_drive_file_id(url: str) -> Optional[str]:
+    """Extrai o File ID de vários formatos de URL do Google Drive."""
+    m = re.search(r"drive\.google\.com/file/d/([a-zA-Z0-9_-]+)", url)
+    if m:
+        return m.group(1)
+    m = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
+    if m:
+        return m.group(1)
+    return None
+
+
+def download_video_from_url(url: str, dest_path: str, progress_callback: Optional[Any] = None) -> str:
+    """
+    Baixa o vídeo a partir de uma URL (suporta links do Google Drive com bypass
+    do aviso de vírus para arquivos grandes e URLs HTTP/HTTPS diretas).
+    Retorna o nome do arquivo detectado.
+    """
+    drive_id = extract_google_drive_file_id(url)
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+    target_url = url
+    if drive_id:
+        target_url = f"https://drive.google.com/uc?export=download&id={drive_id}"
+
+    req = urllib.request.Request(target_url, headers={"User-Agent": user_agent})
+    resp = opener.open(req, timeout=30)
+
+    # Se for Google Drive e retornou HTML (página de aviso de vírus), resolve confirmação
+    content_type = resp.headers.get("Content-Type", "")
+    detected_name = ""
+    
+    if drive_id and "text/html" in content_type.lower():
+        html_bytes = resp.read()
+        html_text = html_bytes.decode("utf-8", errors="ignore")
+        
+        # Tenta extrair o nome original do arquivo presente no HTML do Drive
+        name_match = re.search(r'class="uc-name-size"[^>]*><a[^>]*>([^<]+)</a>', html_text)
+        if name_match:
+            detected_name = name_match.group(1).strip()
+            
+        form_match = re.search(r'<form[^>]+id=["\']download-form["\'][^>]+action=["\']([^"\']+)["\']', html_text)
+        if form_match:
+            action_url = form_match.group(1)
+            inputs = re.findall(r'<input[^>]+name=["\']([^"\']+)["\'][^>]+value=["\']([^"\']*)["\']', html_text)
+            params = {k: v for k, v in inputs}
+            final_url = f"{action_url}?{urllib.parse.urlencode(params)}"
+            req2 = urllib.request.Request(final_url, headers={"User-Agent": user_agent})
+            resp = opener.open(req2, timeout=60)
+        else:
+            # Fallback para token de confirmação
+            token_match = re.search(r"confirm=([0-9A-Za-z_]+)", html_text)
+            confirm_token = token_match.group(1) if token_match else "t"
+            final_url = f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={drive_id}"
+            req2 = urllib.request.Request(final_url, headers={"User-Agent": user_agent})
+            resp = opener.open(req2, timeout=60)
+
+    # Detecta nome via Content-Disposition se não foi detectado ainda
+    disp = resp.headers.get("Content-Disposition", "")
+    if not detected_name and disp:
+        cd_match = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^"\';\r\n]+)', disp)
+        if cd_match:
+            detected_name = urllib.parse.unquote(cd_match.group(1).strip())
+
+    if not detected_name:
+        url_path = urllib.parse.urlparse(url).path
+        base = os.path.basename(url_path)
+        detected_name = base if base and "." in base else "video_download.mp4"
+
+    # Download do arquivo em blocos
+    total_size = int(resp.headers.get("Content-Length", 0))
+    downloaded = 0
+    chunk_size = 1024 * 1024  # 1MB por bloco
+
+    with open(dest_path, "wb") as f_out:
+        while True:
+            chunk = resp.read(chunk_size)
+            if not chunk:
+                break
+            f_out.write(chunk)
+            downloaded += len(chunk)
+            if total_size > 0 and progress_callback:
+                progress_callback(downloaded / total_size, downloaded, total_size)
+
+    return detected_name
 
 
 class AdjustTimeRequest(BaseModel):
@@ -288,9 +381,82 @@ def run_extraction_worker(
         extraction_jobs[job_id]["message"] = f"Erro no processamento: {str(exc)}"
 
 
+@app.post("/api/upload/chunk")
+async def upload_chunk(
+    upload_id: str = Form(...),
+    chunk_index: int = Form(...),
+    total_chunks: int = Form(...),
+    chunk_file: UploadFile = File(...),
+):
+    """
+    Recebe um pedaço (chunk) do arquivo de vídeo fatiado pelo frontend.
+    Grava o pedaço temporário em disco no servidor.
+    """
+    try:
+        session_dir = os.path.join(CHUNK_UPLOADS, upload_id)
+        os.makedirs(session_dir, exist_ok=True)
+        chunk_path = os.path.join(session_dir, f"chunk_{chunk_index:05d}.part")
+
+        with open(chunk_path, "wb") as f:
+            shutil.copyfileobj(chunk_file.file, f, length=4 * 1024 * 1024)
+
+        logger.debug(f"📦 [CHUNK-UPLOAD] upload_id={upload_id} | chunk {chunk_index + 1}/{total_chunks}")
+        return {"success": True, "chunk_index": chunk_index}
+    except Exception as e:
+        logger.error(f"❌ [CHUNK-UPLOAD-ERROR] {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar parte do upload: {str(e)}")
+
+
+@app.post("/api/upload/complete")
+async def complete_chunked_upload(
+    upload_id: str = Form(...),
+    filename: str = Form(...),
+    total_chunks: int = Form(...),
+):
+    """
+    Reconstitui de forma contínua e idêntica bit-a-bit todas as partes enviadas
+    num único arquivo de vídeo final antes de qualquer extração/transcrição.
+    """
+    try:
+        session_dir = os.path.join(CHUNK_UPLOADS, upload_id)
+        if not os.path.exists(session_dir):
+            raise HTTPException(status_code=400, detail="Sessão de upload não encontrada.")
+
+        ext = os.path.splitext(filename)[1] or ".mp4"
+        saved_video = os.path.join(TEMP_UPLOADS, f"input_video_{uuid.uuid4().hex[:8]}{ext}")
+
+        with open(saved_video, "wb") as f_out:
+            for idx in range(total_chunks):
+                chunk_path = os.path.join(session_dir, f"chunk_{idx:05d}.part")
+                if not os.path.exists(chunk_path):
+                    raise HTTPException(status_code=400, detail=f"Parte {idx} não encontrada para montagem.")
+                with open(chunk_path, "rb") as f_in:
+                    shutil.copyfileobj(f_in, f_out, length=8 * 1024 * 1024)
+
+        # Limpa o diretório de partes
+        shutil.rmtree(session_dir, ignore_errors=True)
+        file_size = os.path.getsize(saved_video)
+        logger.info(f"✅ [CHUNK-COMPLETE] Vídeo montado com sucesso | path={saved_video} | size={file_size} bytes")
+
+        return {
+            "success": True,
+            "saved_video_path": saved_video,
+            "filename": filename,
+            "file_size": file_size,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [CHUNK-COMPLETE-ERROR] {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao reconstituir o arquivo: {str(e)}")
+
+
 @app.post("/api/extract")
 async def extract_video(
-    video: UploadFile = File(...),
+    video: Optional[UploadFile] = File(None),
+    video_url: Optional[str] = Form(None),
+    chunked_video_path: Optional[str] = Form(None),
+    chunked_filename: Optional[str] = Form(None),
     subtitle: Optional[UploadFile] = File(None),
     language: str = Form("pt"),
     min_interval: float = Form(2.5),
@@ -298,26 +464,64 @@ async def extract_video(
     sync: bool = Query(False),
 ):
     try:
-        logger.info(f"🚀 [EXTRACT-ENDPOINT] Requisição recebida | filename={video.filename} | lang={language} | sync={sync}")
-        logger.debug(f"📋 [EXTRACT-ENDPOINT] Parâmetros | min_interval={min_interval} | similarity_threshold={similarity_threshold}")
+        saved_video = ""
+        raw_name = "video_treinamento"
 
-        # Salva o vídeo enviado
-        ext = os.path.splitext(video.filename)[1] or ".mp4"
-        saved_video = os.path.join(TEMP_UPLOADS, f"input_video_{uuid.uuid4().hex[:8]}{ext}")
-        logger.debug(f"💾 [EXTRACT-ENDPOINT] Salvando arquivo | path={saved_video}")
+        # 1. Caso A: Vídeo reconstituído via Chunked Upload
+        if chunked_video_path and os.path.exists(chunked_video_path):
+            saved_video = chunked_video_path
+            raw_name = os.path.splitext(chunked_filename or os.path.basename(chunked_video_path))[0]
+            logger.info(f"🚀 [EXTRACT-ENDPOINT] Usando vídeo previamente montado em partes | name={raw_name} | path={saved_video}")
 
-        with open(saved_video, "wb") as f:
-            shutil.copyfileobj(video.file, f, length=16 * 1024 * 1024)
+        # 2. Caso B: Vídeo enviado via Link (Google Drive ou URL web)
+        elif video_url and video_url.strip():
+            clean_url = video_url.strip()
+            logger.info(f"🚀 [EXTRACT-ENDPOINT] Baixando vídeo a partir de URL | url={clean_url}")
+            temp_dest = os.path.join(TEMP_UPLOADS, f"input_video_{uuid.uuid4().hex[:8]}.mp4")
+            
+            job_id_dl = f"job_{uuid.uuid4().hex}"
+            extraction_jobs[job_id_dl] = {
+                "status": "processing",
+                "stage": "upload",
+                "progress": 0.02,
+                "message": "Baixando vídeo a partir do link fornecido...",
+                "result": None,
+                "error": None,
+            }
 
-        logger.info(f"✅ [EXTRACT-ENDPOINT] Arquivo salvo com sucesso | size={os.path.getsize(saved_video)} bytes")
+            def url_progress(ratio, cur, tot):
+                pct = min(0.06, 0.01 + (ratio * 0.05))
+                extraction_jobs[job_id_dl]["progress"] = round(pct, 3)
+                mb_cur = round(cur / (1024 * 1024), 1)
+                mb_tot = round(tot / (1024 * 1024), 1) if tot > 0 else "?"
+                extraction_jobs[job_id_dl]["message"] = f"Baixando vídeo: {mb_cur}MB / {mb_tot}MB..."
 
-        raw_name = os.path.splitext(video.filename)[0]
+            try:
+                detected_name = download_video_from_url(clean_url, temp_dest, progress_callback=url_progress)
+                saved_video = temp_dest
+                raw_name = os.path.splitext(detected_name)[0]
+                logger.info(f"✅ [EXTRACT-ENDPOINT] Download concluído com sucesso | name={raw_name} | size={os.path.getsize(saved_video)} bytes")
+            except Exception as dl_err:
+                logger.error(f"❌ [EXTRACT-ENDPOINT] Erro ao baixar vídeo da URL: {str(dl_err)}")
+                raise HTTPException(status_code=400, detail=f"Não foi possível baixar o vídeo da URL informada: {str(dl_err)}")
+
+        # 3. Caso C: Upload de arquivo direto multipart tradicional
+        elif video and video.filename:
+            logger.info(f"🚀 [EXTRACT-ENDPOINT] Requisição com arquivo direto | filename={video.filename} | lang={language} | sync={sync}")
+            ext = os.path.splitext(video.filename)[1] or ".mp4"
+            saved_video = os.path.join(TEMP_UPLOADS, f"input_video_{uuid.uuid4().hex[:8]}{ext}")
+            with open(saved_video, "wb") as f:
+                shutil.copyfileobj(video.file, f, length=16 * 1024 * 1024)
+            raw_name = os.path.splitext(video.filename)[0]
+            logger.info(f"✅ [EXTRACT-ENDPOINT] Arquivo direto salvo | size={os.path.getsize(saved_video)} bytes")
+        else:
+            raise HTTPException(status_code=400, detail="Nenhum arquivo de vídeo, link ou upload em partes foi fornecido.")
+
         sub_bytes = await subtitle.read() if (subtitle and subtitle.filename) else None
-
         if sub_bytes:
             logger.info(f"📄 [EXTRACT-ENDPOINT] Arquivo de legenda detectado | size={len(sub_bytes)} bytes")
         else:
-            logger.debug(f"📄 [EXTRACT-ENDPOINT] Nenhum arquivo de legenda fornecido")
+            logger.debug("📄 [EXTRACT-ENDPOINT] Nenhum arquivo de legenda fornecido")
 
         job_id = f"job_{uuid.uuid4().hex}"
         logger.info(f"🎯 [EXTRACT-ENDPOINT] Job criado | job_id={job_id}")
@@ -326,7 +530,7 @@ async def extract_video(
             "status": "processing",
             "stage": "upload",
             "progress": 0.05,
-            "message": "Vídeo salvo. Iniciando análise...",
+            "message": "Vídeo pronto. Iniciando análise...",
             "result": None,
             "error": None,
         }
@@ -375,6 +579,17 @@ async def extract_video(
         logger.error(f"❌ [EXTRACT-ENDPOINT] ERRO inesperado | error={str(e)}")
         logger.error(f"📋 [EXTRACT-ENDPOINT] Stack trace:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/extract/cancel/{job_id}")
+def cancel_extraction(job_id: str):
+    logger.info(f"🛑 [CANCEL-ENDPOINT] Solicitação de cancelamento | job_id={job_id}")
+    job = extraction_jobs.get(job_id)
+    if job:
+        job["status"] = "cancelled"
+        job["message"] = "Processamento suspenso pelo usuário."
+        return {"success": True, "message": "Job cancelado com sucesso."}
+    return {"success": False, "message": "Job não encontrado."}
 
 
 @app.get("/api/extract/progress/{job_id}")

@@ -3,9 +3,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 storage/temp_uploads/*
+storage/chunk_uploads/*
 storage/extracted_frames/*
 storage/outputs/*
 !storage/**/.gitkeep
+logs/*
+!logs/.gitkeep
 figma/
 frontend/node_modules/
 frontend/dist/

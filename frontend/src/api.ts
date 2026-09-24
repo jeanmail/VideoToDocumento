@@ -61,11 +61,87 @@ export interface ExtractController {
   abort: () => void;
 }
 
+export interface ExtractParams {
+  videoFile?: File | null;
+  videoUrl?: string | null;
+  subtitleFile?: File | null;
+  language?: string;
+  minInterval?: number;
+  similarityThreshold?: number;
+  onProgress?: (progress: number, message: string, stage: string) => void;
+  controllerRef?: { current?: ExtractController };
+}
+
 const API_BASE = '/api';
 
 export const api = {
+  /**
+   * Envia arquivo fatiado em partes (chunks de ~15MB) para evitar o erro de limite
+   * de payload do Google Cloud Run (32MB) e outros servidores sem vendor lock-in.
+   */
+  async uploadFileChunked(
+    file: File,
+    chunkSize = 15 * 1024 * 1024,
+    onProgress?: (ratio: number, msg: string) => void,
+    checkCancelled?: () => boolean
+  ): Promise<{ saved_video_path: string; filename: string }> {
+    const uploadId = `upl_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const totalChunks = Math.ceil(file.size / chunkSize);
+
+    for (let i = 0; i < totalChunks; i++) {
+      if (checkCancelled && checkCancelled()) {
+        throw new ExtractError('Processamento suspenso pelo usuário.');
+      }
+
+      const start = i * chunkSize;
+      const end = Math.min(file.size, start + chunkSize);
+      const chunkBlob = file.slice(start, end);
+
+      const chunkForm = new FormData();
+      chunkForm.append('upload_id', uploadId);
+      chunkForm.append('chunk_index', i.toString());
+      chunkForm.append('total_chunks', totalChunks.toString());
+      chunkForm.append('chunk_file', chunkBlob, file.name);
+
+      const pct = Math.round(((i + 1) / totalChunks) * 100);
+      onProgress?.((i + 1) / totalChunks, `Enviando parte ${i + 1} de ${totalChunks} (${pct}%)...`);
+
+      const resp = await fetch(`${API_BASE}/upload/chunk`, {
+        method: 'POST',
+        body: chunkForm,
+      });
+
+      if (!resp.ok) {
+        const errJson = await resp.json().catch(() => ({ detail: 'Erro no upload de parte' }));
+        throw new ExtractError(errJson.detail || `Erro ao enviar parte ${i + 1}`);
+      }
+    }
+
+    if (checkCancelled && checkCancelled()) {
+      throw new ExtractError('Processamento suspenso pelo usuário.');
+    }
+
+    onProgress?.(1, 'Montando vídeo no servidor...');
+    const completeForm = new FormData();
+    completeForm.append('upload_id', uploadId);
+    completeForm.append('filename', file.name);
+    completeForm.append('total_chunks', totalChunks.toString());
+
+    const compResp = await fetch(`${API_BASE}/upload/complete`, {
+      method: 'POST',
+      body: completeForm,
+    });
+
+    if (!compResp.ok) {
+      const errJson = await compResp.json().catch(() => ({ detail: 'Erro ao unir partes do vídeo' }));
+      throw new ExtractError(errJson.detail || 'Falha ao reconstituir vídeo no servidor');
+    }
+
+    return compResp.json();
+  },
+
   async extractVideo(
-    videoFile: File,
+    videoOrParams: File | ExtractParams,
     subtitleFile?: File | null,
     language = 'pt',
     minInterval = 2.5,
@@ -73,14 +149,29 @@ export const api = {
     onProgress?: (progress: number, message: string, stage: string) => void,
     controllerRef?: { current?: ExtractController }
   ): Promise<ExtractResponse> {
-    const formData = new FormData();
-    formData.append('video', videoFile);
-    if (subtitleFile) {
-      formData.append('subtitle', subtitleFile);
+    // Permite chamada com objeto ExtractParams ou assinatura legada
+    let file: File | null = null;
+    let url: string | null = null;
+    let sub: File | null = null;
+    let lang = language;
+    let minInt = minInterval;
+    let simThresh = similarityThreshold;
+    let progCb = onProgress;
+    let ctrlRef = controllerRef;
+
+    if (videoOrParams instanceof File) {
+      file = videoOrParams;
+      sub = subtitleFile || null;
+    } else {
+      file = videoOrParams.videoFile || null;
+      url = videoOrParams.videoUrl || null;
+      sub = videoOrParams.subtitleFile || null;
+      lang = videoOrParams.language || 'pt';
+      minInt = videoOrParams.minInterval ?? 2.5;
+      simThresh = videoOrParams.similarityThreshold ?? 88;
+      progCb = videoOrParams.onProgress;
+      ctrlRef = videoOrParams.controllerRef;
     }
-    formData.append('language', language);
-    formData.append('min_interval', minInterval.toString());
-    formData.append('similarity_threshold', similarityThreshold.toString());
 
     let activeXhr: XMLHttpRequest | null = null;
     let activeInterval: any = null;
@@ -94,8 +185,8 @@ export const api = {
       }
     };
 
-    if (controllerRef) {
-      controllerRef.current = {
+    if (ctrlRef) {
+      ctrlRef.current = {
         abort: () => {
           isCancelled = true;
           cleanup();
@@ -109,7 +200,45 @@ export const api = {
       };
     }
 
-    // 1. Envio do vídeo com acompanhamento de upload via XMLHttpRequest
+    const formData = new FormData();
+    if (sub) {
+      formData.append('subtitle', sub);
+    }
+    formData.append('language', lang);
+    formData.append('min_interval', minInt.toString());
+    formData.append('similarity_threshold', simThresh.toString());
+
+    // Se tiver URL de vídeo (ex: Google Drive ou link direto)
+    if (url && url.trim()) {
+      progCb?.(2, 'Conectando ao link do vídeo...', 'upload');
+      formData.append('video_url', url.trim());
+    }
+    // Se for arquivo e maior que 20MB, usa upload fatiado (chunked) para contornar qualquer limite
+    else if (file && file.size > 20 * 1024 * 1024) {
+      progCb?.(1, 'Iniciando upload fatiado seguro...', 'upload');
+      const assembled = await this.uploadFileChunked(
+        file,
+        15 * 1024 * 1024,
+        (ratio, msg) => {
+          progCb?.(Math.min(5, Math.max(1, Math.round(ratio * 5))), msg, 'upload');
+        },
+        () => isCancelled
+      );
+      formData.append('chunked_video_path', assembled.saved_video_path);
+      formData.append('chunked_filename', assembled.filename);
+    }
+    // Arquivo menor que 20MB: upload multipart normal
+    else if (file) {
+      formData.append('video', file);
+    } else {
+      throw new ExtractError('Nenhum vídeo ou link foi informado.');
+    }
+
+    if (isCancelled) {
+      throw new ExtractError('Processamento suspenso pelo usuário.');
+    }
+
+    // Dispara a requisição /api/extract
     const jobData: { job_id?: string; status?: string } & Partial<ExtractResponse> = await new Promise(
       (resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -117,9 +246,9 @@ export const api = {
         xhr.open('POST', `${API_BASE}/extract`);
 
         xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable && !isCancelled) {
+          if (e.lengthComputable && !isCancelled && file && file.size <= 20 * 1024 * 1024) {
             const uploadPct = Math.round((e.loaded / e.total) * 100);
-            onProgress?.(
+            progCb?.(
               Math.min(5, Math.round(uploadPct * 0.05)),
               `Enviando vídeo para o servidor (${uploadPct}%)...`,
               'upload'
@@ -176,7 +305,7 @@ export const api = {
 
     // Se o backend respondeu de forma síncrona diretamente
     if (!jobData.job_id && (jobData as ExtractResponse).frames) {
-      onProgress?.(100, 'Processamento concluído!', 'done');
+      progCb?.(100, 'Processamento concluído!', 'done');
       return jobData as ExtractResponse;
     }
 
@@ -206,11 +335,11 @@ export const api = {
           }
 
           const percent = Math.min(100, Math.max(5, Math.round((job.progress || 0) * 100)));
-          onProgress?.(percent, job.message || 'Processando...', job.stage || 'transcription');
+          progCb?.(percent, job.message || 'Processando...', job.stage || 'transcription');
 
           if (job.status === 'completed') {
             cleanup();
-            onProgress?.(100, 'Processamento concluído com sucesso!', 'done');
+            progCb?.(100, 'Processamento concluído com sucesso!', 'done');
             resolve({ ...job.result, job_id: jobId });
           } else if (job.status === 'cancelled') {
             cleanup();
