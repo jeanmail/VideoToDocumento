@@ -53,7 +53,8 @@ EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8501/api/health || exit 1
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app \
+    PORT=8501
 
-# Inicializa o servidor FastAPI servindo o React na porta 8501
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8501"]
+# Inicializa o servidor FastAPI servindo o React na porta dinâmica do ambiente ($PORT)
+CMD ["sh", "-c", "exec uvicorn server:app --host 0.0.0.0 --port ${PORT:-8501}"]
