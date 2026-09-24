@@ -259,15 +259,19 @@ def save_job_state(job_id: str):
     """
     Persiste o estado do job em disco (JSON e metadados binários) para garantir
     tolerância a múltiplos workers/instâncias no Cloud Run, Render ou Docker.
+    Utiliza escrita atômica (arquivo temporário + os.replace) para evitar que
+    o endpoint de consulta leia o arquivo truncado (0 bytes) ou corrompido.
     """
     job = extraction_jobs.get(job_id)
     if not job:
         return
     try:
         json_path = os.path.join(JOBS_DIR, f"{job_id}.json")
+        json_tmp_path = os.path.join(JOBS_DIR, f"{job_id}.json.tmp")
         meta_path = os.path.join(JOBS_DIR, f"{job_id}.meta")
+        meta_tmp_path = os.path.join(JOBS_DIR, f"{job_id}.meta.tmp")
 
-        # Serializa campos seguros em JSON
+        # Serializa campos seguros em JSON de forma atômica
         safe_copy = {
             "status": job.get("status"),
             "stage": job.get("stage"),
@@ -276,15 +280,21 @@ def save_job_state(job_id: str):
             "result": job.get("result"),
             "error": job.get("error"),
         }
-        with open(json_path, "w", encoding="utf-8") as f:
+        with open(json_tmp_path, "w", encoding="utf-8") as f:
             json.dump(safe_copy, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(json_tmp_path, json_path)
 
-        # Se houver objetos internos complexos (_frames, _subtitles, etc.), persiste em .meta
+        # Se houver objetos internos complexos (_frames, _subtitles, etc.), persiste em .meta atomicamente
         has_meta = any(k.startswith("_") for k in job.keys())
         if has_meta:
             meta_dict = {k: v for k, v in job.items() if k.startswith("_")}
-            with open(meta_path, "wb") as f_meta:
+            with open(meta_tmp_path, "wb") as f_meta:
                 pickle.dump(meta_dict, f_meta)
+                f_meta.flush()
+                os.fsync(f_meta.fileno())
+            os.replace(meta_tmp_path, meta_path)
     except Exception as e:
         logger.error(f"⚠️ [JOB-SAVE-ERROR] Não foi possível salvar estado do job={job_id}: {str(e)}")
 
@@ -292,6 +302,7 @@ def save_job_state(job_id: str):
 def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     """
     Retorna o job da memória ou do disco caso a requisição caia em outra instância / worker.
+    Tolerante a leituras concorrentes com pequeno retry.
     """
     if job_id in extraction_jobs:
         return extraction_jobs[job_id]
@@ -300,21 +311,26 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
     meta_path = os.path.join(JOBS_DIR, f"{job_id}.meta")
 
     if os.path.exists(json_path):
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                restored = json.load(f)
-            if os.path.exists(meta_path):
-                try:
-                    with open(meta_path, "rb") as f_meta:
-                        meta = pickle.load(f_meta)
-                        restored.update(meta)
-                except Exception as meta_err:
-                    logger.warn(f"⚠️ [JOB-META-WARN] Falha ao ler .meta do job={job_id}: {str(meta_err)}")
-            extraction_jobs[job_id] = restored
-            logger.info(f"🔄 [JOB-RESTORED] Job={job_id} restaurado do disco para a memória")
-            return restored
-        except Exception as e:
-            logger.error(f"❌ [JOB-RESTORE-ERROR] Falha ao carregar {json_path}: {str(e)}")
+        # Tenta ler com retry breve caso o arquivo esteja sendo finalizado por replace
+        for attempt in range(2):
+            try:
+                with open(json_path, "r", encoding="utf-8") as f:
+                    restored = json.load(f)
+                if os.path.exists(meta_path):
+                    try:
+                        with open(meta_path, "rb") as f_meta:
+                            meta = pickle.load(f_meta)
+                            restored.update(meta)
+                    except Exception as meta_err:
+                        logger.warn(f"⚠️ [JOB-META-WARN] Falha ao ler .meta do job={job_id}: {str(meta_err)}")
+                extraction_jobs[job_id] = restored
+                logger.info(f"🔄 [JOB-RESTORED] Job={job_id} restaurado do disco para a memória")
+                return restored
+            except Exception as e:
+                if attempt == 0:
+                    time.sleep(0.08)
+                    continue
+                logger.error(f"❌ [JOB-RESTORE-ERROR] Falha ao carregar {json_path}: {str(e)}")
 
     return None
 
@@ -679,6 +695,11 @@ def cancel_extraction(job_id: str):
 def get_extract_progress(job_id: str):
     logger.debug(f"🔍 [PROGRESS-ENDPOINT] Consultando progresso | job_id={job_id}")
     job = get_job(job_id)
+    if not job:
+        # Dá uma segunda chance breve (150ms) caso o worker esteja executando os.replace concorrentemente
+        time.sleep(0.15)
+        job = get_job(job_id)
+
     if not job:
         logger.warn(f"⚠️ [PROGRESS-ENDPOINT] Job não encontrado | job_id={job_id}")
         raise HTTPException(status_code=404, detail="Job não encontrado")

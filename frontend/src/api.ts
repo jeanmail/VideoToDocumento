@@ -315,7 +315,8 @@ export const api = {
     // 2. Polling contínuo do progresso da transcrição e extração
     return new Promise((resolve, reject) => {
       let consecutiveErrors = 0;
-      const maxConsecutiveErrors = 10; // Tolera até 10 falhas transitórias consecutivas (~8s)
+      // Tolera até 40 falhas transitórias consecutivas (~32s - 40s) permitindo aquecimento de containers e throttling de CPU
+      const maxConsecutiveErrors = 40;
 
       activeInterval = setInterval(async () => {
         if (isCancelled) {
