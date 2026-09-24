@@ -743,7 +743,7 @@ elif st.session_state.current_step == 3:
     with proj_col2:
         gcs_bucket_name = st.text_input(
             "Nome do Bucket no GCS:",
-            value=st.session_state.get("gcs_bucket_name", "kb-contact-center-vertex"),
+            value=st.session_state.get("gcs_bucket_name", "kb-contact-center"),
             help="Bucket do Google Cloud Storage que armazena os arquivos da base de conhecimento."
         )
         st.session_state.gcs_bucket_name = gcs_bucket_name

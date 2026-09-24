@@ -77,7 +77,7 @@ class PublishGCSRequest(BaseModel):
     title: str
     description: Optional[str] = ""
     product_slug: str
-    bucket_name: Optional[str] = "kb-contact-center-vertex"
+    bucket_name: Optional[str] = "kb-contact-center"
     selected_frame_ids: List[str]
 
 

@@ -23,13 +23,15 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds, jobId }:
   const [title, setTitle] = useState(videoName || 'Guia de Treinamento');
   const [description, setDescription] = useState('');
   const [product, setProduct] = useState('');
+  const [bucketName, setBucketName] = useState('kb-contact-center');
   const [gcsExpanded, setGcsExpanded] = useState(false);
   const [generating, setGenerating] = useState<string | null>(null);
   const [done, setDone] = useState<Set<string>>(new Set());
   const [gcsMessage, setGcsMessage] = useState<string | null>(null);
 
   const slug = String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const gcsPath = product && slug ? `gs://kb-contact-center-vertex/${product}/${slug}/` : null;
+  const effectiveBucket = bucketName.trim() || 'kb-contact-center';
+  const gcsPath = product && slug ? `gs://${effectiveBucket}/${product}/${slug}/` : null;
 
   const handleDownload = (format: 'docx' | 'pdf' | 'zip') => {
     setGenerating(format);
@@ -62,7 +64,7 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds, jobId }:
         title,
         description,
         product_slug: product,
-        bucket_name: 'kb-contact-center-vertex',
+        bucket_name: effectiveBucket,
         selected_frame_ids: selectedFrameIds,
         job_id: jobId,
       });
@@ -180,6 +182,21 @@ export function Step3Export({ onBack, videoName = '', selectedFrameIds, jobId }:
 
             {gcsExpanded && (
               <div className="border-t border-[#EFF6FF] px-5 py-5 flex flex-col gap-4">
+
+                {/* Bucket name editable */}
+                <div>
+                  <label className="block text-[12px] font-medium text-[#374151] mb-1.5">
+                    Nome do Bucket no GCS
+                  </label>
+                  <input
+                    type="text"
+                    value={bucketName}
+                    onChange={(e) => setBucketName(e.target.value)}
+                    placeholder="Ex: kb-contact-center"
+                    className="w-full border border-[#E5E7EB] rounded-xl px-4 py-2.5 text-[13px] font-mono text-[#111827] focus:outline-none focus:ring-2 focus:ring-[#3B82F6] focus:border-transparent transition-shadow"
+                  />
+                  <p className="text-[11px] text-[#9CA3AF] mt-1">Bucket central onde serão criadas as pastas dos produtos.</p>
+                </div>
 
                 {/* Product */}
                 <div>

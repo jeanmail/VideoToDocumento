@@ -69,7 +69,7 @@ def slugify_training_name(name: str) -> str:
 
 
 class GCSPublisher:
-    def __init__(self, default_bucket: str = "kb-contact-center-vertex"):
+    def __init__(self, default_bucket: str = "kb-contact-center"):
         self.default_bucket = default_bucket
 
     @staticmethod
