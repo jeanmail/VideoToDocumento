@@ -100,12 +100,21 @@ class AudioTranscriber:
                 progress_callback(0.30, "Processando fala do áudio...")
 
             lang_arg = language if (language and language != "auto") else None
+            # Otimização de alta velocidade para CPU única:
+            # - beam_size=1 (greedy search): reduz operações em 4x
+            # - best_of=1: evita caminhos alternativos redundantes
+            # - condition_on_previous_text=False: evita reprocessamento em loop
+            # - vad_filter=True com threshold ajustado: pula silêncios rapidamente
             segments, info = self._model.transcribe(
                 audio_path,
                 language=lang_arg,
-                beam_size=5,
+                beam_size=1,
+                best_of=1,
+                temperature=0.0,
+                condition_on_previous_text=False,
                 word_timestamps=False,
-                vad_filter=True  # Filtra silêncios automaticamente
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=500),
             )
 
             results: List[SubtitleItem] = []

@@ -365,11 +365,16 @@ def run_extraction_worker(
             logger.info(f"✅ [WORKER] Legendas parseadas | job_id={job_id} | count={len(subs)}")
         else:
             logger.info(f"🎤 [WORKER] Iniciando Whisper transcription | job_id={job_id} | lang={language}")
+            last_audio_save = [0.0]
             def audio_progress(ratio: float, msg: str):
                 mapped_prog = min(0.65, 0.10 + (ratio * 0.55))
                 extraction_jobs[job_id]["progress"] = round(mapped_prog, 3)
                 extraction_jobs[job_id]["message"] = msg
-                save_job_state(job_id)
+                now = time.time()
+                # Salva em disco apenas a cada 1.0s para não estrangular I/O do contêiner
+                if now - last_audio_save[0] >= 1.0 or ratio >= 0.99:
+                    save_job_state(job_id)
+                    last_audio_save[0] = now
                 logger.debug(f"📊 [WORKER-AUDIO-PROGRESS] job_id={job_id} | progress={round(mapped_prog*100, 1)}% | msg={msg}")
 
             # Diagnóstico de memória em runtime
@@ -401,11 +406,15 @@ def run_extraction_worker(
         subs_grouped = group_subtitles(subs or [], max_gap_seconds=1.5, max_duration_seconds=15.0)
         logger.debug(f"📋 [WORKER] Legendas agrupadas | job_id={job_id} | grouped_count={len(subs_grouped)}")
 
+        last_frames_save = [0.0]
         def frames_progress(ratio: float, msg: str):
             mapped_prog = min(0.98, 0.68 + (ratio * 0.30))
             extraction_jobs[job_id]["progress"] = round(mapped_prog, 3)
             extraction_jobs[job_id]["message"] = msg
-            save_job_state(job_id)
+            now = time.time()
+            if now - last_frames_save[0] >= 1.0 or ratio >= 0.99:
+                save_job_state(job_id)
+                last_frames_save[0] = now
             logger.debug(f"📊 [WORKER-FRAMES-PROGRESS] job_id={job_id} | progress={round(mapped_prog*100, 1)}% | msg={msg}")
 
         extracted = processor.process_subtitles(

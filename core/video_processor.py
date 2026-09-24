@@ -221,8 +221,7 @@ class VideoProcessor:
         """
         Percorre os itens de legenda, extrai os frames no momento ideal e
         marca potenciais capturas redundantes por análise de similaridade visual.
-        
-        capture_offset_ratio: Posição dentro do intervalo da legenda (ex: 0.2 = 20% do início para evitar transições).
+        Reutiliza uma única conexão VideoCapture aberta para evitar reaberturas pesadas de I/O em disco.
         """
         os.makedirs(output_dir, exist_ok=True)
         results: List[ExtractedFrame] = []
@@ -230,58 +229,72 @@ class VideoProcessor:
         last_hash: Optional[int] = None
         total_subs = len(subtitles)
 
-        for idx, sub in enumerate(subtitles):
-            if progress_callback and total_subs > 0:
-                progress_callback((idx + 1) / float(total_subs), f"Extraindo e analisando telas ({idx + 1}/{total_subs})...")
+        cap = cv2.VideoCapture(self.video_path)
+        try:
+            for idx, sub in enumerate(subtitles):
+                if progress_callback and total_subs > 0:
+                    progress_callback((idx + 1) / float(total_subs), f"Extraindo e analisando telas ({idx + 1}/{total_subs})...")
 
-            # Calcula o momento ideal de captura (um pouco após o início para evitar cortes de cena em transição)
-            target_time = sub.start_seconds + (sub.duration_seconds * capture_offset_ratio)
-            
-            # Se for menor que o intervalo mínimo desde a última extração, ignoramos para evitar excesso de prints
-            if (target_time - last_extracted_time) < min_interval_seconds:
-                continue
+                # Calcula o momento ideal de captura
+                target_time = sub.start_seconds + (sub.duration_seconds * capture_offset_ratio)
+                
+                # Se for menor que o intervalo mínimo desde a última extração, ignoramos
+                if (target_time - last_extracted_time) < min_interval_seconds:
+                    continue
 
-            frame_img = self.get_frame_at_timestamp(target_time)
-            if frame_img is None:
-                continue
+                if not cap.isOpened():
+                    frame_img = self.get_frame_at_timestamp(target_time)
+                else:
+                    target_ms = max(0.0, min(self.duration_seconds - 0.05, target_time)) * 1000.0
+                    cap.set(cv2.CAP_PROP_POS_MSEC, target_ms)
+                    success, frame_img = cap.read()
+                    if not success or frame_img is None:
+                        frame_img = self.get_frame_at_timestamp(target_time)
 
-            # Calcula hash visual
-            current_hash = compute_dhash(frame_img)
-            is_duplicate = False
-            sim_score = 0.0
+                if frame_img is None:
+                    continue
 
-            if last_hash is not None:
-                sim_score = calculate_similarity(last_hash, current_hash)
-                if sim_score >= similarity_threshold:
-                    is_duplicate = True
+                # Calcula hash visual
+                current_hash = compute_dhash(frame_img)
+                is_duplicate = False
+                sim_score = 0.0
 
-            # Detecta câmeras, webcams ou quadros sem interface de software
-            is_non_system, non_sys_reason = detect_non_system_frame(frame_img)
+                if last_hash is not None:
+                    sim_score = calculate_similarity(last_hash, current_hash)
+                    if sim_score >= similarity_threshold:
+                        is_duplicate = True
 
-            # Salva o arquivo de imagem
-            image_path = self.save_frame_to_file(frame_img, output_dir, file_prefix=f"step_{idx+1}")
+                # Detecta câmeras, webcams ou quadros sem interface de software
+                is_non_system, non_sys_reason = detect_non_system_frame(frame_img)
 
-            # Desmarca automaticamente os duplicados e telas sem sistema/webcams
-            should_select = (not is_duplicate) and (not is_non_system)
+                # Salva o arquivo de imagem
+                image_path = self.save_frame_to_file(frame_img, output_dir, file_prefix=f"step_{idx+1}")
 
-            frame_id = f"frame_{idx+1}_{uuid.uuid4().hex[:6]}"
-            results.append(ExtractedFrame(
-                id=frame_id,
-                timestamp_seconds=target_time,
-                timestamp_str=sub.start_time_str,
-                subtitle_text=sub.text,
-                image_path=image_path,
-                is_duplicate_candidate=is_duplicate,
-                similarity_score=round(sim_score, 3),
-                is_non_system_candidate=is_non_system,
-                non_system_reason=non_sys_reason,
-                selected=should_select,
-                step_title=f"Passo {len(results) + 1}",
-                ocr_text=""
-            ))
+                # Desmarca automaticamente os duplicados e telas sem sistema/webcams
+                should_select = (not is_duplicate) and (not is_non_system)
 
-            last_extracted_time = target_time
-            last_hash = current_hash
+                frame_id = f"frame_{idx+1}_{uuid.uuid4().hex[:6]}"
+                results.append(ExtractedFrame(
+                    id=frame_id,
+                    timestamp_seconds=target_time,
+                    timestamp_str=sub.start_time_str,
+                    subtitle_text=sub.text,
+                    image_path=image_path,
+                    is_duplicate_candidate=is_duplicate,
+                    similarity_score=round(sim_score, 3),
+                    is_non_system_candidate=is_non_system,
+                    non_system_reason=non_sys_reason,
+                    selected=should_select,
+                    step_title=f"Passo {len(results) + 1}",
+                    ocr_text=""
+                ))
+
+                last_extracted_time = target_time
+                last_hash = current_hash
+
+        finally:
+            if cap is not None:
+                cap.release()
 
         return results
 
