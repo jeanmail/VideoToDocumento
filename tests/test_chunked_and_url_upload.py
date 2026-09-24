@@ -76,3 +76,44 @@ def test_extract_google_drive_file_id():
 
     url4 = "https://meusite.com/video.mp4"
     assert server.extract_google_drive_file_id(url4) is None
+
+
+def test_job_state_persistence_and_recovery():
+    """
+    Testa se o estado de um job é salvo em disco e recuperado com sucesso caso
+    uma requisição de polling ou export caia em outra instância/worker ou após limpar da memória.
+    """
+    test_job_id = "job_test_persistence_999"
+    server.extraction_jobs[test_job_id] = {
+        "status": "completed",
+        "stage": "done",
+        "progress": 1.0,
+        "message": "Processamento concluído com sucesso!",
+        "result": {"frames": [], "video_name": "teste"},
+        "error": None,
+    }
+    server.save_job_state(test_job_id)
+
+    # Verifica se o arquivo JSON foi criado no diretório JOBS_DIR
+    job_file = os.path.join(server.JOBS_DIR, f"{test_job_id}.json")
+    assert os.path.exists(job_file)
+
+    # Remove o job da memória simulando outra instância de Cloud Run
+    del server.extraction_jobs[test_job_id]
+    assert test_job_id not in server.extraction_jobs
+
+    # Faz requisição ao endpoint de progresso
+    resp = client.get(f"/api/extract/progress/{test_job_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "completed"
+    assert data["progress"] == 1.0
+    assert data["result"]["video_name"] == "teste"
+
+    # Cleanup
+    if os.path.exists(job_file):
+        os.remove(job_file)
+    meta_file = os.path.join(server.JOBS_DIR, f"{test_job_id}.meta")
+    if os.path.exists(meta_file):
+        os.remove(meta_file)
+

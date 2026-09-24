@@ -4,6 +4,8 @@ Serve a API REST para extração, auditoria, downloads e publicação GCS,
 além de servir os arquivos estáticos compilados do React na mesma porta.
 """
 
+import json
+import pickle
 import os
 import shutil
 import tempfile
@@ -53,9 +55,10 @@ TEMP_UPLOADS = os.path.join(STORAGE_DIR, "temp_uploads")
 CHUNK_UPLOADS = os.path.join(STORAGE_DIR, "chunk_uploads")
 EXTRACTED_FRAMES = os.path.join(STORAGE_DIR, "extracted_frames")
 OUTPUTS_DIR = os.path.join(STORAGE_DIR, "outputs")
+JOBS_DIR = os.path.join(STORAGE_DIR, "jobs")
 FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
 
-for d in [TEMP_UPLOADS, CHUNK_UPLOADS, EXTRACTED_FRAMES, OUTPUTS_DIR]:
+for d in [TEMP_UPLOADS, CHUNK_UPLOADS, EXTRACTED_FRAMES, OUTPUTS_DIR, JOBS_DIR]:
     os.makedirs(d, exist_ok=True)
 
 app = FastAPI(title="VideoToDocument API", version="2.0.0")
@@ -241,8 +244,72 @@ def get_logs(lines: int = Query(50), level: str = Query("all")):
         return {"error": str(e), "lines": []}
 
 
-# Gerenciamento de tarefas de processamento com feedback de progresso
+# Gerenciamento de tarefas de processamento com feedback de progresso e persistência em disco
 extraction_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+def save_job_state(job_id: str):
+    """
+    Persiste o estado do job em disco (JSON e metadados binários) para garantir
+    tolerância a múltiplos workers/instâncias no Cloud Run, Render ou Docker.
+    """
+    job = extraction_jobs.get(job_id)
+    if not job:
+        return
+    try:
+        json_path = os.path.join(JOBS_DIR, f"{job_id}.json")
+        meta_path = os.path.join(JOBS_DIR, f"{job_id}.meta")
+
+        # Serializa campos seguros em JSON
+        safe_copy = {
+            "status": job.get("status"),
+            "stage": job.get("stage"),
+            "progress": job.get("progress"),
+            "message": job.get("message"),
+            "result": job.get("result"),
+            "error": job.get("error"),
+        }
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(safe_copy, f, ensure_ascii=False)
+
+        # Se houver objetos internos complexos (_frames, _subtitles, etc.), persiste em .meta
+        has_meta = any(k.startswith("_") for k in job.keys())
+        if has_meta:
+            meta_dict = {k: v for k, v in job.items() if k.startswith("_")}
+            with open(meta_path, "wb") as f_meta:
+                pickle.dump(meta_dict, f_meta)
+    except Exception as e:
+        logger.error(f"⚠️ [JOB-SAVE-ERROR] Não foi possível salvar estado do job={job_id}: {str(e)}")
+
+
+def get_job(job_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Retorna o job da memória ou do disco caso a requisição caia em outra instância / worker.
+    """
+    if job_id in extraction_jobs:
+        return extraction_jobs[job_id]
+
+    json_path = os.path.join(JOBS_DIR, f"{job_id}.json")
+    meta_path = os.path.join(JOBS_DIR, f"{job_id}.meta")
+
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                restored = json.load(f)
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "rb") as f_meta:
+                        meta = pickle.load(f_meta)
+                        restored.update(meta)
+                except Exception as meta_err:
+                    logger.warn(f"⚠️ [JOB-META-WARN] Falha ao ler .meta do job={job_id}: {str(meta_err)}")
+            extraction_jobs[job_id] = restored
+            logger.info(f"🔄 [JOB-RESTORED] Job={job_id} restaurado do disco para a memória")
+            return restored
+        except Exception as e:
+            logger.error(f"❌ [JOB-RESTORE-ERROR] Falha ao carregar {json_path}: {str(e)}")
+
+    return None
 
 
 def run_extraction_worker(
@@ -260,6 +327,7 @@ def run_extraction_worker(
         extraction_jobs[job_id]["stage"] = "transcription"
         extraction_jobs[job_id]["message"] = "Iniciando transcrição de áudio..."
         extraction_jobs[job_id]["progress"] = 0.08
+        save_job_state(job_id)
 
         video_name = raw_name.replace("_", " ").replace("-", " ").strip()
         logger.debug(f"📝 [WORKER] video_name={video_name} | job_id={job_id}")
@@ -269,6 +337,7 @@ def run_extraction_worker(
             logger.info(f"📄 [WORKER] Usando arquivo de legenda fornecido | job_id={job_id} | size={len(subtitle_content)} bytes")
             extraction_jobs[job_id]["message"] = "Processando arquivo de legenda fornecido..."
             extraction_jobs[job_id]["progress"] = 0.60
+            save_job_state(job_id)
             subs = parse_subtitles(subtitle_content)
             logger.info(f"✅ [WORKER] Legendas parseadas | job_id={job_id} | count={len(subs)}")
         else:
@@ -277,6 +346,7 @@ def run_extraction_worker(
                 mapped_prog = min(0.65, 0.10 + (ratio * 0.55))
                 extraction_jobs[job_id]["progress"] = round(mapped_prog, 3)
                 extraction_jobs[job_id]["message"] = msg
+                save_job_state(job_id)
                 logger.debug(f"📊 [WORKER-AUDIO-PROGRESS] job_id={job_id} | progress={round(mapped_prog*100, 1)}% | msg={msg}")
 
             transcriber = AudioTranscriber(model_size="base")
@@ -288,6 +358,7 @@ def run_extraction_worker(
         extraction_jobs[job_id]["stage"] = "extraction"
         extraction_jobs[job_id]["message"] = "Sincronizando timeline e extraindo frames de sistema..."
         extraction_jobs[job_id]["progress"] = 0.68
+        save_job_state(job_id)
 
         processor = VideoProcessor(saved_video)
         logger.debug(f"📹 [WORKER] VideoProcessor criado | job_id={job_id}")
@@ -299,6 +370,7 @@ def run_extraction_worker(
             mapped_prog = min(0.98, 0.68 + (ratio * 0.30))
             extraction_jobs[job_id]["progress"] = round(mapped_prog, 3)
             extraction_jobs[job_id]["message"] = msg
+            save_job_state(job_id)
             logger.debug(f"📊 [WORKER-FRAMES-PROGRESS] job_id={job_id} | progress={round(mapped_prog*100, 1)}% | msg={msg}")
 
         extracted = processor.process_subtitles(
@@ -351,6 +423,7 @@ def run_extraction_worker(
         extraction_jobs[job_id]["progress"] = 1.0
         extraction_jobs[job_id]["message"] = "Processamento concluído com sucesso!"
         extraction_jobs[job_id]["result"] = result_payload
+        save_job_state(job_id)
         logger.info(f"🎉 [WORKER-COMPLETE] job_id={job_id} | status=completed | frames={len(extracted)}")
 
         # Schedule limpeza do vídeo temporário após 10 minutos
@@ -379,6 +452,7 @@ def run_extraction_worker(
         extraction_jobs[job_id]["status"] = "error"
         extraction_jobs[job_id]["error"] = str(exc)
         extraction_jobs[job_id]["message"] = f"Erro no processamento: {str(exc)}"
+        save_job_state(job_id)
 
 
 @app.post("/api/upload/chunk")
@@ -534,6 +608,7 @@ async def extract_video(
             "result": None,
             "error": None,
         }
+        save_job_state(job_id)
 
         if sync:
             logger.info(f"⏱️ [EXTRACT-ENDPOINT] Modo SÍNCRONO ativado | job_id={job_id}")
@@ -584,10 +659,11 @@ async def extract_video(
 @app.post("/api/extract/cancel/{job_id}")
 def cancel_extraction(job_id: str):
     logger.info(f"🛑 [CANCEL-ENDPOINT] Solicitação de cancelamento | job_id={job_id}")
-    job = extraction_jobs.get(job_id)
+    job = get_job(job_id)
     if job:
         job["status"] = "cancelled"
         job["message"] = "Processamento suspenso pelo usuário."
+        save_job_state(job_id)
         return {"success": True, "message": "Job cancelado com sucesso."}
     return {"success": False, "message": "Job não encontrado."}
 
@@ -595,7 +671,7 @@ def cancel_extraction(job_id: str):
 @app.get("/api/extract/progress/{job_id}")
 def get_extract_progress(job_id: str):
     logger.debug(f"🔍 [PROGRESS-ENDPOINT] Consultando progresso | job_id={job_id}")
-    job = extraction_jobs.get(job_id)
+    job = get_job(job_id)
     if not job:
         logger.warn(f"⚠️ [PROGRESS-ENDPOINT] Job não encontrado | job_id={job_id}")
         raise HTTPException(status_code=404, detail="Job não encontrado")
@@ -608,7 +684,7 @@ def get_extract_progress(job_id: str):
 def adjust_frame_time(frame_id: str, req: AdjustTimeRequest, job_id: str = Query(...)):
     logger.info(f"⏰ [ADJUST-TIME-ENDPOINT] Solicitação de ajuste | job_id={job_id} | frame_id={frame_id} | delta={req.delta_seconds}s")
 
-    job = extraction_jobs.get(job_id)
+    job = get_job(job_id)
     if not job or job.get("status") != "completed":
         logger.warn(f"⚠️ [ADJUST-TIME-ENDPOINT] Job inválido | job_id={job_id} | status={job.get('status') if job else 'N/A'}")
         raise HTTPException(status_code=404, detail="Job não encontrado ou ainda está processando")
@@ -635,6 +711,7 @@ def adjust_frame_time(frame_id: str, req: AdjustTimeRequest, job_id: str = Query
         logger.error(f"❌ [ADJUST-TIME-ENDPOINT] Falha ao extrair novo frame | job_id={job_id} | frame_id={frame_id} | time={new_time}s")
         raise HTTPException(status_code=500, detail="Falha ao extrair novo frame no timestamp")
 
+    save_job_state(job_id)
     step_idx = frames.index(target_frame) + 1
     logger.info(f"✅ [ADJUST-TIME-ENDPOINT] Frame ajustado com sucesso | job_id={job_id} | frame_id={frame_id} | new_time={new_time}s")
     return {"success": True, "frame": frame_to_dict(target_frame, step_idx)}
@@ -644,7 +721,7 @@ def adjust_frame_time(frame_id: str, req: AdjustTimeRequest, job_id: str = Query
 def export_docx(title: str = Query("Guia de Treinamento"), frame_ids: str = Query(""), job_id: str = Query(...)):
     logger.info(f"📄 [EXPORT-DOCX-ENDPOINT] Solicitação de export | job_id={job_id} | title={title}")
 
-    job = extraction_jobs.get(job_id)
+    job = get_job(job_id)
     if not job or job.get("status") != "completed":
         logger.warn(f"⚠️ [EXPORT-DOCX-ENDPOINT] Job inválido | job_id={job_id} | status={job.get('status') if job else 'N/A'}")
         raise HTTPException(status_code=404, detail="Job não encontrado ou ainda está processando")
@@ -674,7 +751,7 @@ def export_docx(title: str = Query("Guia de Treinamento"), frame_ids: str = Quer
 def export_pdf(title: str = Query("Guia de Treinamento"), frame_ids: str = Query(""), job_id: str = Query(...)):
     logger.info(f"📑 [EXPORT-PDF-ENDPOINT] Solicitação de export | job_id={job_id} | title={title}")
 
-    job = extraction_jobs.get(job_id)
+    job = get_job(job_id)
     if not job or job.get("status") != "completed":
         logger.warn(f"⚠️ [EXPORT-PDF-ENDPOINT] Job inválido | job_id={job_id} | status={job.get('status') if job else 'N/A'}")
         raise HTTPException(status_code=404, detail="Job não encontrado ou ainda está processando")
@@ -704,7 +781,7 @@ def export_pdf(title: str = Query("Guia de Treinamento"), frame_ids: str = Query
 def export_zip(title: str = Query("Guia de Treinamento"), frame_ids: str = Query(""), job_id: str = Query(...)):
     logger.info(f"📦 [EXPORT-ZIP-ENDPOINT] Solicitação de export | job_id={job_id} | title={title}")
 
-    job = extraction_jobs.get(job_id)
+    job = get_job(job_id)
     if not job or job.get("status") != "completed":
         logger.warn(f"⚠️ [EXPORT-ZIP-ENDPOINT] Job inválido | job_id={job_id} | status={job.get('status') if job else 'N/A'}")
         raise HTTPException(status_code=404, detail="Job não encontrado ou ainda está processando")
@@ -763,7 +840,7 @@ def export_zip(title: str = Query("Guia de Treinamento"), frame_ids: str = Query
 def publish_gcs(req: PublishGCSRequest, job_id: str = Query(...)):
     logger.info(f"☁️ [PUBLISH-GCS-ENDPOINT] Solicitação de publicação | job_id={job_id} | title={req.title} | product={req.product_slug}")
 
-    job = extraction_jobs.get(job_id)
+    job = get_job(job_id)
     if not job or job.get("status") != "completed":
         logger.warn(f"⚠️ [PUBLISH-GCS-ENDPOINT] Job inválido | job_id={job_id} | status={job.get('status') if job else 'N/A'}")
         raise HTTPException(status_code=404, detail="Job não encontrado ou ainda está processando")

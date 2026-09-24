@@ -314,6 +314,9 @@ export const api = {
 
     // 2. Polling contínuo do progresso da transcrição e extração
     return new Promise((resolve, reject) => {
+      let consecutiveErrors = 0;
+      const maxConsecutiveErrors = 10; // Tolera até 10 falhas transitórias consecutivas (~8s)
+
       activeInterval = setInterval(async () => {
         if (isCancelled) {
           cleanup();
@@ -323,10 +326,17 @@ export const api = {
         try {
           const res = await fetch(`${API_BASE}/extract/progress/${jobId}`);
           if (!res.ok) {
-            cleanup();
-            reject(new ExtractError(`Falha ao consultar progresso (HTTP ${res.status})`));
+            consecutiveErrors++;
+            console.warn(`[POLLING] Falha transitória (${res.status}) ao consultar progresso (${consecutiveErrors}/${maxConsecutiveErrors})`);
+            if (consecutiveErrors >= maxConsecutiveErrors) {
+              cleanup();
+              reject(new ExtractError(`Falha ao consultar progresso (HTTP ${res.status})`));
+            }
             return;
           }
+
+          // Requisição bem-sucedida, zera o contador de erros consecutivos
+          consecutiveErrors = 0;
 
           const job = await res.json();
           if (isCancelled) {
@@ -349,14 +359,18 @@ export const api = {
             reject(new ExtractError(job.message || job.error || 'Erro durante o processamento do vídeo', job.details || job.error));
           }
         } catch (err: any) {
-          cleanup();
           if (isCancelled) {
-            reject(new ExtractError('Processamento suspenso pelo usuário.'));
-          } else {
+            cleanup();
+            return reject(new ExtractError('Processamento suspenso pelo usuário.'));
+          }
+          consecutiveErrors++;
+          console.warn(`[POLLING] Erro de rede transitório (${consecutiveErrors}/${maxConsecutiveErrors}):`, err);
+          if (consecutiveErrors >= maxConsecutiveErrors) {
+            cleanup();
             reject(err instanceof ExtractError ? err : new ExtractError(err.message || 'Erro de comunicação', err.stack));
           }
         }
-      }, 400);
+      }, 800);
     });
   },
 

@@ -6,6 +6,7 @@ storage/temp_uploads/*
 storage/chunk_uploads/*
 storage/extracted_frames/*
 storage/outputs/*
+storage/jobs/*
 !storage/**/.gitkeep
 logs/*
 !logs/.gitkeep

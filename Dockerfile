@@ -45,7 +45,7 @@ COPY . .
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 # Cria diretórios de armazenamento e logs
-RUN mkdir -p storage/temp_uploads storage/extracted_frames storage/outputs logs
+RUN mkdir -p storage/temp_uploads storage/chunk_uploads storage/extracted_frames storage/outputs storage/jobs logs
 
 # Porta de serviço (mantém 8501 para compatibilidade com o Render)
 EXPOSE 8501
