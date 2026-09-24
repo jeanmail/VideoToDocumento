@@ -12,6 +12,9 @@ from core.srt_parser import SubtitleItem, export_to_srt
 
 
 class AudioTranscriber:
+    _cached_model = None
+    _cached_model_key = None
+
     def __init__(self, model_size: str = "base", device: str = "cpu", compute_type: str = "int8"):
         """
         model_size: 'tiny', 'base', 'small', 'medium'.
@@ -20,7 +23,6 @@ class AudioTranscriber:
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
-        self._model = None
 
     def _get_ffmpeg_path(self) -> str:
         """Obtém o binário estático do FFmpeg garantido pelo imageio-ffmpeg."""
@@ -52,14 +54,21 @@ class AudioTranscriber:
         return output_wav_path
 
     def _load_model(self):
-        if self._model is None:
-            from faster_whisper import WhisperModel
-            # int8 em CPU é extremamente rápido e consome pouca memória
-            try:
-                self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
-            except Exception:
-                # Fallback para float32 caso a CPU não suporte int8
-                self._model = WhisperModel(self.model_size, device=self.device, compute_type="float32")
+        cache_key = f"{self.model_size}_{self.device}_{self.compute_type}"
+        if AudioTranscriber._cached_model is not None and AudioTranscriber._cached_model_key == cache_key:
+            self._model = AudioTranscriber._cached_model
+            return
+
+        from faster_whisper import WhisperModel
+        # int8 em CPU é extremamente rápido e consome 50% menos memória
+        try:
+            self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
+        except Exception:
+            # Fallback para float32 caso a CPU não suporte int8
+            self._model = WhisperModel(self.model_size, device=self.device, compute_type="float32")
+
+        AudioTranscriber._cached_model = self._model
+        AudioTranscriber._cached_model_key = cache_key
 
     def transcribe(
         self,

@@ -372,9 +372,21 @@ def run_extraction_worker(
                 save_job_state(job_id)
                 logger.debug(f"📊 [WORKER-AUDIO-PROGRESS] job_id={job_id} | progress={round(mapped_prog*100, 1)}% | msg={msg}")
 
-            transcriber = AudioTranscriber(model_size="base")
+            # Diagnóstico de memória em runtime
+            model_to_use = "base"
+            try:
+                import psutil
+                mem = psutil.virtual_memory()
+                logger.info(f"🧠 [WORKER-RAM] RAM Total: {round(mem.total / (1024**3), 2)}GB | Disponível: {round(mem.available / (1024**3), 2)}GB ({mem.percent}% em uso)")
+                if mem.available < 700 * 1024 * 1024:
+                    logger.warn("⚠️ [WORKER-RAM] Pouca memória disponível (<700MB). Usando modelo 'tiny' para prevenir OOM.")
+                    model_to_use = "tiny"
+            except ImportError:
+                pass
+
+            transcriber = AudioTranscriber(model_size=model_to_use, compute_type="int8")
             subs = transcriber.transcribe(saved_video, language=language, progress_callback=audio_progress)
-            logger.info(f"✅ [WORKER] Transcrição concluída | job_id={job_id} | subtitles={len(subs)}")
+            logger.info(f"✅ [WORKER] Transcrição concluída | job_id={job_id} | model={model_to_use} | subtitles={len(subs)}")
 
         # Fase 2: Extração de frames
         logger.info(f"🎬 [WORKER] Iniciando extração de frames | job_id={job_id}")

@@ -38,6 +38,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Pré-download do modelo Faster-Whisper para evitar download em runtime e OOM/timeout
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"
+
 # Copia código do backend e motores
 COPY . .
 
